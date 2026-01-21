@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import regex as re
-from collections import Counter, defaultdict
+from collections import defaultdict
 
 def pretokenize_file(
     input_path: str | os.PathLike,
@@ -50,23 +50,17 @@ def merge(
     for pre_token in pre_tokens:
         if len(pre_token) == 1 or pre_token[0] in special_byte_set:
             continue
-        for a, b in zip(pre_token, pre_token[1 :]):
+        for a, b in zip(pre_token, pre_token[1 :]):     # 统计所有相邻元素出现的次数
             pair = (a, b)
             counts[pair] += 1
 
-    best_count = 0
-    best_pair = None
-    for pair, count in counts.items():
-        if count > best_count:
-            best_pair = pair
-            best_count = count
-        elif count == best_count and pair > best_pair:
-            best_pair = pair
-
     if not counts:
         return pre_tokens, vocab, merges
+    best_pair, best_count = max(counts.items(), key=lambda kv: (kv[1], kv[0]))
+    # 找出出现次数最多的 pair （若次数相同则选择最大的那个）
+
     a, b = best_pair
-    new_tok = a + b
+    new_tok = a + b     # 新的 token
     new_id = len(vocab)
     vocab[new_id] = new_tok
     merges.append((a, b))
