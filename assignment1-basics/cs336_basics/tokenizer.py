@@ -35,28 +35,24 @@ def pretokenize_file(
             for m in PAT.finditer(part):
                 b = m.group(0).encode("utf-8")
                 pretoken_counts[tuple(b)] += 1
-                # 普通段内按照 PAT 分割成若干个 token，每个 token 转换为 bytes 后再转换为 tuple，累加出现次数
+                # 普通段内按照 PAT 分割成若干个 token，每个 token 解码为 bytes 后再转换为 tuple，累加出现次数
+                # 因为直接取出单个 bytes 得到的是它的 int 值，所以此时的 tuple 里面也都是 int，它也就是后面的 seq
 
     return pretoken_counts
 
 def merge(
     pretoken_counts: Counter[tuple[int, ...]],
+    pair_counts : dict[tuple[int,int], int],
+    pair_sets : dict[tuple[int,int], set[tuple[int,...]]],
     vocab: dict[int, bytes],
     merges: list[tuple[bytes, bytes]],
-) -> tuple[Counter[tuple[int, ...]], dict[int, bytes], list[tuple[bytes, bytes]]]:
-    pair_counts = defaultdict(int)
-    for seq, freq in pretoken_counts.items():   # 某个 pretoken 对应的整数序列和它出现的次数
-        if len(seq) < 2:
-            continue
-        for i in range(len(seq) - 1):
-            pair_counts[(seq[i], seq[i + 1])] += freq     # 这个 pair 对总次数的贡献是 freq
-
+) -> tuple[Counter[tuple[int, ...]], dict[tuple[int,int], int], dict[tuple[int,int], set[tuple[int,...]]], dict[int, bytes], list[tuple[bytes, bytes]]]:
     if not pair_counts:
-        return pretoken_counts, vocab, merges
+        return pretoken_counts, pair_counts, pair_sets, vocab, merges
     best_pair, _ = max(
         pair_counts.items(),
         key=lambda kv: (kv[1], vocab[kv[0][0]], vocab[kv[0][1]]))
-    # 找出出现次数最多的 pair （比较 kv[1]），若次数相同则选择 pair 最大的那个（优先比较第一个元素，在比较第二个元素）
+    # 找出出现次数最多的 pair （比较 kv[1]），若次数相同则选择 pair 最大的那个（优先比较第一个元素，再比较第二个元素）
 
     a, b = best_pair
     new_tok = vocab[a] + vocab[b]     # 新的 token
@@ -64,8 +60,22 @@ def merge(
     vocab[new_id] = new_tok
     merges.append((vocab[a], vocab[b]))
 
-    new_pretoken_counts : Counter[tuple[int, ...]] = Counter()
-    for seq, freq in pretoken_counts.items():
+    affected_seqs = list(pair_sets[best_pair])    # 所有包含 best_pair 的 seq
+    # 实际上，token 转换为 bytes
+    for seq in affected_seqs:
+        freq = pretoken_counts.pop(seq)
+        seen_pairs = set()
+        for i in range(len(seq) - 1):
+            pair = (seq[i], seq[i + 1])
+            pair_counts[pair] -= freq  # 这个 pair 对总次数的贡献是 freq
+            seen_pairs.add(pair)    # 先加入到 seen_pairs 中，防止重复删除
+        for pair in seen_pairs:
+            pair_sets[pair].remove(seq)     # pair 对应的集合中去掉 seq
+            if pair_counts[pair] == 0:
+                del pair_counts[pair]
+                if not pair_sets[pair]:
+                    del pair_sets[pair]
+
         new_seq = []
         i = 0
         while i < len(seq):
@@ -75,9 +85,15 @@ def merge(
             else:
                 new_seq.append(seq[i])      # 否则添加原来的 id
                 i += 1
-        new_pretoken_counts[tuple(new_seq)] += freq     # 累加新的 seq 出现的次数
+        new_seq = tuple(new_seq)
 
-    return new_pretoken_counts, vocab, merges
+        pretoken_counts[new_seq] += freq     # 累加新的 seq 出现的次数
+        for i in range(len(new_seq) - 1):
+            pair = (new_seq[i], new_seq[i + 1])
+            pair_counts[pair] += freq   # 这个 pair 对总次数的贡献是 freq
+            pair_sets[pair].add(new_seq)    # 新的 seq 加入 pair 对应的集合
+
+    return pretoken_counts, pair_counts, pair_sets, vocab, merges
 
 def train_bpe(
     input_path: str | os.PathLike,
@@ -104,9 +120,19 @@ def train_bpe(
 
     pretoken_counts = pretokenize_file(input_path, special_tokens, special_id)
 
+    pair_counts = defaultdict(int)
+    pair_sets = defaultdict(set)
+    for seq, freq in pretoken_counts.items():  # 某个 pretoken 对应的整数序列和它出现的次数
+        if len(seq) < 2:
+            continue
+        for i in range(len(seq) - 1):
+            pair = (seq[i], seq[i + 1])
+            pair_counts[pair] += freq  # 这个 pair 对总次数的贡献是 freq
+            pair_sets[pair].add(seq)
+
     num_merges = vocab_size - 256 - len(special_tokens)
     for i in range(num_merges):
-        pretoken_counts, vocab, merges = merge(pretoken_counts, vocab, merges)
+        pretoken_counts, pair_counts, pair_sets, vocab, merges = merge(pretoken_counts, pair_counts, pair_sets, vocab, merges)
 
     return vocab, merges
 
