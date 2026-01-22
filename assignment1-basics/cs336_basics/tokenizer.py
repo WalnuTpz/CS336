@@ -224,7 +224,9 @@ class Tokenizer:
         special_tokens: list[str] = None
     ):
         self.id_to_bytes: dict[int, bytes] = dict(vocab)      # 浅拷贝，防止直接赋值时两者指向同一个 dict
-        self.bytes_to_id: dict[bytes, int] = {b: i for i, b in self.id_to_bytes.items()}
+        self.bytes_to_id: dict[bytes, int] = {}
+        for i, b in self.id_to_bytes.items():
+            self.bytes_to_id[b] = i
 
         # 处理新添加的特殊 token
         self.special_tokens: list[str] = special_tokens if special_tokens else []
@@ -292,7 +294,7 @@ class Tokenizer:
         self.bpe_cache[b] = tuple(ids)
         return ids
 
-    def encode(self, text: str):
+    def encode(self, text: str):    # 将文本转换为编码
         if self.special_set:
             delimit = "|".join(re.escape(tok) for tok in self.special_set)
             parts = re.split(f"({delimit})", text)
@@ -314,9 +316,17 @@ class Tokenizer:
 
     def encode_iterable(self, iterable: list[str]) -> Generator[int, Any, None]:    # 将一个文本流进行 encode
         for s in iterable:
-            for s_id in self.encode(s):
-                yield s_id      # 将每个 id 依次加入到生成器中
-        
+            for id_ in self.encode(s):
+                yield id_      # 将每个 id 依次加入到生成器中
+
+    def decode(self, ids: list[int]) -> str:    # 将编码转换为文本
+        bytes_list: list[bytes] = []
+        for id_ in ids:
+            bytes_list.append(self.id_to_bytes[id_])
+        bytes_text = b"".join(bytes_list)       # 将 bytes 列表合并为一整个 bytes 串
+        text = bytes_text.decode("utf-8")
+
+        return text
 
 
 
