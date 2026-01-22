@@ -284,19 +284,24 @@ class Tokenizer:
 
         return ids
 
-    def encode_tok(self, tok: str) -> list[int]:    # 对单个 token 进行 encode
+    def encode_token(self, tok: str) -> list[int]:    # 对单个 token 进行 encode
         b = tok.encode("utf-8")
         if b in self.bpe_cache:
             return list(self.bpe_cache[b])
 
-        ids = list(b)     # 将 bytes 初始化为 ids
+        ids: list[int] = []
+        for i in range(len(b)):     # 将 bytes 初始化为 ids
+            byte = b[i : i + 1]
+            ids.append(self.bytes_to_id[byte])
         ids = self.merge_ids(ids)
         self.bpe_cache[b] = tuple(ids)
         return ids
 
     def encode(self, text: str):    # 将文本转换为编码
         if self.special_set:
-            delimit = "|".join(re.escape(tok) for tok in self.special_set)
+            # 将 special set 排序后再进行匹配，防止某个 special token 是另一个的子串时匹配出错
+            sorted_special_set = sorted(self.special_set, key = len, reverse = True)
+            delimit = "|".join(re.escape(tok) for tok in sorted_special_set)
             parts = re.split(f"({delimit})", text)
         else:
             parts = [text]
@@ -310,7 +315,7 @@ class Tokenizer:
             else:
                 for m in PAT.finditer(part):
                     tok = m.group(0)
-                    ids.extend(self.encode_tok(tok))
+                    ids.extend(self.encode_token(tok))
 
         return ids
 
@@ -329,7 +334,7 @@ class Tokenizer:
         return text
 
     @classmethod
-    def from_files(
+    def from_files(     # 从文件中读取 vocab 和 merges 用来构造 Tokenizer 类
         cls,
         vocab_fp: str | os.PathLike,
         merges_fp: str | os.PathLike,
