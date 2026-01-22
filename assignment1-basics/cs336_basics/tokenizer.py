@@ -324,11 +324,34 @@ class Tokenizer:
         for id_ in ids:
             bytes_list.append(self.id_to_bytes[id_])
         bytes_text = b"".join(bytes_list)       # 将 bytes 列表合并为一整个 bytes 串
-        text = bytes_text.decode("utf-8")
+        text = bytes_text.decode("utf-8", errors = "replace")
 
         return text
 
+    @classmethod
+    def from_files(
+        cls,
+        vocab_fp: str | os.PathLike,
+        merges_fp: str | os.PathLike,
+        special_tokens: list[str] = None,
+    ) -> Tokenizer:
+        # 读取 vocab.json
+        with open(vocab_fp, "r", encoding = "utf-8") as f:
+            vocab_raw = json.load(f)
+        vocab:dict[int, bytes] = {}
+        for k, v in vocab_raw.items():
+            vocab[int(k)] = base64.b64decode(v)
 
+        # 读取 merges.json
+        with open(merges_fp, "r", encoding = "utf-8") as f:
+            merges_raw = json.load(f)
+        merges:list[tuple[bytes, bytes]] = []
+        for item in merges_raw:
+            a = base64.b64decode(item[0])
+            b = base64.b64decode(item[1])
+            merges.append((a, b))
+
+        return cls(vocab, merges, special_tokens = special_tokens)
 
 
 
