@@ -166,6 +166,48 @@ def train_bpe(
 
     num_merges = vocab_size - 256 - len(special_tokens)
     for i in range(num_merges):
-        pretoken_counts, pair_counts, pair_sets, heap, vocab, merges = merge(pretoken_counts, pair_counts, pair_sets, heap, vocab, merges)
+        pretoken_counts, pair_counts, pair_sets, heap, vocab, merges = merge(
+            pretoken_counts, pair_counts, pair_sets, heap, vocab, merges
+        )
+
+    return vocab, merges
+
+def train_bpe_from_counts(
+    pretoken_counts: Counter[tuple[int, ...]],
+    vocab_size: int,
+    special_tokens: list[str],
+) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+    """
+    Train BPE starting from pretoken_counts (Counter of byte-id tuples).
+    This lets external scripts do multiprocessing pretokenization and reuse our merge logic.
+    """
+    vocab: dict[int, bytes] = {}
+    merges: list[tuple[bytes, bytes]] = []
+
+    for i in range(256):
+        vocab[i] = bytes([i])
+    for i, tok in enumerate(special_tokens):
+        vocab[256 + i] = tok.encode("utf-8")
+
+    pair_counts = defaultdict(int)
+    pair_sets = defaultdict(set)
+    for seq, freq in pretoken_counts.items():
+        if len(seq) < 2:
+            continue
+        for i in range(len(seq) - 1):
+            pair = (seq[i], seq[i + 1])
+            pair_counts[pair] += freq
+            pair_sets[pair].add(seq)
+
+    heap: list[tuple[int, RevBytes, RevBytes, int, int]] = []
+    for (a, b), c in pair_counts.items():
+        if c > 0:
+            heapq.heappush(heap, (-c, RevBytes(vocab[a]), RevBytes(vocab[b]), a, b))
+
+    num_merges = vocab_size - 256 - len(special_tokens)
+    for _ in range(num_merges):
+        pretoken_counts, pair_counts, pair_sets, heap, vocab, merges = merge(
+            pretoken_counts, pair_counts, pair_sets, heap, vocab, merges
+        )
 
     return vocab, merges
