@@ -253,7 +253,64 @@ class Tokenizer:
 
         self.bpe_cache: dict[bytes, tuple[int, ...]] = {}
 
+    def merge_ids(self, ids: list[int]) -> list[int]:   # 将 ids 中的元素按照训练规则合并
+        while len(ids) >= 2:
+            best_rank = float('inf')
+            best_pair = None
+            for i in range(len(ids) - 1):
+                pair = (ids[i], ids[i + 1])
+                rank = self.pair_rank.get(pair)
+                if rank is not None and rank < best_rank:
+                    best_rank = rank
+                    best_pair = pair
+            if best_pair is None:
+                break
 
+            new_id = self.pair_id[best_pair]
+            new_ids = []
+            i = 0
+            while i < len(ids):
+                if i < len(ids) - 1 and ids[i] == best_pair[0] and ids[i + 1] == best_pair[1]:
+                    new_ids.append(new_id)
+                    i += 2
+                else:
+                    new_ids.append(ids[i])
+                    i += 1
+            ids = new_ids
+
+        return ids
+
+    def encode_tok(self, tok: str) -> list[int]:
+        b = tok.encode("utf-8")
+        if b in self.bpe_cache:
+            return list(self.bpe_cache[b])
+
+        ids = list(b)     # 将 bytes 初始化为 ids
+        ids = self.merge_ids(ids)
+        self.bpe_cache[b] = tuple(ids)
+        return ids
+
+    def encode(self, text: list[str]):
+        if self.special_set:
+            delimit = "|".join(re.escape(tok) for tok in self.special_set)
+            parts = re.split(f"({delimit})", text)
+        else:
+            parts = [text]
+
+        ids:list[int] = []
+        for part in parts:
+            if not part:
+                continue
+            if part in self.special_set:
+                ids.append(self.special_id[part])
+            else:
+                for m in PAT.finditer(part):
+                    tok = m.group(0)
+                    ids.extend(self.encode_tok(tok))
+
+        return ids
+
+    
 
 
 
