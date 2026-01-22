@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import base64
 import json
+from typing import Any, Generator
+
 import regex as re
 import heapq
 from collections import Counter, defaultdict
@@ -280,7 +282,7 @@ class Tokenizer:
 
         return ids
 
-    def encode_tok(self, tok: str) -> list[int]:
+    def encode_tok(self, tok: str) -> list[int]:    # 对单个 token 进行 encode
         b = tok.encode("utf-8")
         if b in self.bpe_cache:
             return list(self.bpe_cache[b])
@@ -290,7 +292,7 @@ class Tokenizer:
         self.bpe_cache[b] = tuple(ids)
         return ids
 
-    def encode(self, text: list[str]):
+    def encode(self, text: str):
         if self.special_set:
             delimit = "|".join(re.escape(tok) for tok in self.special_set)
             parts = re.split(f"({delimit})", text)
@@ -310,7 +312,12 @@ class Tokenizer:
 
         return ids
 
-    
+    def encode_iterable(self, iterable: list[str]) -> Generator[int, Any, None]:    # 将一个文本流进行 encode
+        for s in iterable:
+            for s_id in self.encode(s):
+                yield s_id      # 将每个 id 依次加入到生成器中
+        
+
 
 
 
