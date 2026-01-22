@@ -135,5 +135,3 @@ def train_bpe(
         pretoken_counts, pair_counts, pair_sets, vocab, merges = merge(pretoken_counts, pair_counts, pair_sets, vocab, merges)
 
     return vocab, merges
-
-
