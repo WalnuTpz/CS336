@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import os
+import base64
+import json
 import regex as re
 import heapq
 from collections import Counter, defaultdict
 
 PAT = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
 
-def pretokenize_file(
+def pretokenize_file(   # 对文本进行预分词
     input_path: str | os.PathLike,
     special_tokens: list[str],
     special_id: dict[str, int]
@@ -49,7 +51,7 @@ class RevBytes:     # 反转字节类（用于后续建立大根堆）
     def __eq__(self, other: object) -> bool:
         return isinstance(other, RevBytes) and self.b == other.b
 
-def merge(
+def merge(      # 单次合并操作
     pretoken_counts: Counter[tuple[int, ...]],
     pair_counts: dict[tuple[int,int], int],
     pair_sets: dict[tuple[int,int], set[tuple[int,...]]],
@@ -122,7 +124,7 @@ def merge(
 
     return pretoken_counts, pair_counts, pair_sets, heap, vocab, merges
 
-def train_bpe(
+def train_bpe(      # 主训练函数
     input_path: str | os.PathLike,
     vocab_size: int,
     special_tokens: list[str],
@@ -172,7 +174,7 @@ def train_bpe(
 
     return vocab, merges
 
-def train_bpe_from_counts(
+def train_bpe_from_counts(      # 给定 pretoken_counts 的训练函数
     pretoken_counts: Counter[tuple[int, ...]],
     vocab_size: int,
     special_tokens: list[str],
@@ -186,8 +188,8 @@ def train_bpe_from_counts(
 
     for i in range(256):
         vocab[i] = bytes([i])
-    for i, tok in enumerate(special_tokens):
-        vocab[256 + i] = tok.encode("utf-8")
+    for i in range(len(special_tokens)):
+        vocab[i + 256] = special_tokens[i].encode("utf-8")
 
     pair_counts = defaultdict(int)
     pair_sets = defaultdict(set)
@@ -205,9 +207,60 @@ def train_bpe_from_counts(
             heapq.heappush(heap, (-c, RevBytes(vocab[a]), RevBytes(vocab[b]), a, b))
 
     num_merges = vocab_size - 256 - len(special_tokens)
-    for _ in range(num_merges):
+    for i in range(num_merges):
         pretoken_counts, pair_counts, pair_sets, heap, vocab, merges = merge(
             pretoken_counts, pair_counts, pair_sets, heap, vocab, merges
         )
 
     return vocab, merges
+
+class Tokenizer:
+    def __init__(
+        self,
+        vocab: dict[int, bytes],
+        merges: list[tuple[bytes, bytes]],
+        special_tokens: list[str] = None
+    ):
+        self.id_to_bytes: dict[int, bytes] = dict(vocab)      # 浅拷贝，防止直接赋值时两者指向同一个 dict
+        self.bytes_to_id: dict[bytes, int] = {b: i for i, b in self.id_to_bytes.items()}
+
+        # 处理新添加的特殊 token
+        self.special_tokens: list[str] = special_tokens if special_tokens else []
+        self.special_set: set[str] = set(self.special_tokens)
+        self.special_id: dict[str, int] = {}
+        next_id = max(self.id_to_bytes.keys()) + 1
+        for tok in self.special_tokens:
+            b = tok.encode("utf-8")
+            if b in self.bytes_to_id:
+                b_id = self.bytes_to_id[b]      # 已在词表中的 special token 直接获取 id
+            else:
+                b_id = next_id      # 不在词表中的 special token 将 next_id 作为它的 id
+                next_id += 1
+                self.id_to_bytes[b_id] = b      # 将 token 和 id 加入词表和反向词表
+                self.bytes_to_id[b] = b_id
+            self.special_id[tok] = b_id
+
+        # 将 merges 中生成的所有新 token 的 rank,id 加入字典
+        self.pair_rank: dict[tuple[int, int], int] = {}
+        self.pair_id: dict[tuple[int, int], int] = {}
+        for i in range(len(merges)):
+            a, b = merges[i]
+            id_pair = (self.bytes_to_id[a], self.bytes_to_id[b])
+            new_tok = a + b
+            new_id = self.bytes_to_id[new_tok]
+            self.pair_rank[id_pair] = i
+            self.pair_id[id_pair] = new_id
+
+        self.bpe_cache: dict[bytes, tuple[int, ...]] = {}
+
+
+
+
+
+
+
+
+
+
+
+
