@@ -227,6 +227,9 @@ class Tokenizer:
         self.bytes_to_id: dict[bytes, int] = {}
         for i, b in self.id_to_bytes.items():
             self.bytes_to_id[b] = i
+        self.byte_id:list[int] = []    # 单个 byte 的 int 值对应的 id
+        for i in range(256):
+            self.byte_id.append(self.bytes_to_id[bytes([i])])
 
         # 处理新添加的特殊 token
         self.special_tokens: list[str] = special_tokens if special_tokens else []
@@ -256,6 +259,31 @@ class Tokenizer:
             self.pair_id[id_pair] = new_id
 
         self.bpe_cache: dict[bytes, tuple[int, ...]] = {}
+
+    @classmethod
+    def from_files(     # 从文件中读取 vocab 和 merges 用来构造 Tokenizer 类
+        cls,
+        vocab_fp: str | os.PathLike,
+        merges_fp: str | os.PathLike,
+        special_tokens: list[str] = None,
+    ) -> Tokenizer:
+        # 读取 vocab.json
+        with open(vocab_fp, "r", encoding = "utf-8") as f:
+            vocab_raw = json.load(f)
+        vocab:dict[int, bytes] = {}
+        for k, v in vocab_raw.items():
+            vocab[int(k)] = base64.b64decode(v)
+
+        # 读取 merges.json
+        with open(merges_fp, "r", encoding = "utf-8") as f:
+            merges_raw = json.load(f)
+        merges:list[tuple[bytes, bytes]] = []
+        for item in merges_raw:
+            a = base64.b64decode(item[0])
+            b = base64.b64decode(item[1])
+            merges.append((a, b))
+
+        return cls(vocab, merges, special_tokens = special_tokens)
 
     def merge_ids(self, ids: list[int]) -> list[int]:   # 将 ids 中的元素按照训练规则合并
         while len(ids) >= 2:
@@ -290,9 +318,8 @@ class Tokenizer:
             return list(self.bpe_cache[b])
 
         ids: list[int] = []
-        for i in range(len(b)):     # 将 bytes 初始化为 ids
-            byte = b[i : i + 1]
-            ids.append(self.bytes_to_id[byte])
+        for byte in b:     # 将 bytes 初始化为 ids
+            ids.append(self.byte_id[byte])
         ids = self.merge_ids(ids)
         self.bpe_cache[b] = tuple(ids)
         return ids
@@ -332,37 +359,3 @@ class Tokenizer:
         text = bytes_text.decode("utf-8", errors = "replace")
 
         return text
-
-    @classmethod
-    def from_files(     # 从文件中读取 vocab 和 merges 用来构造 Tokenizer 类
-        cls,
-        vocab_fp: str | os.PathLike,
-        merges_fp: str | os.PathLike,
-        special_tokens: list[str] = None,
-    ) -> Tokenizer:
-        # 读取 vocab.json
-        with open(vocab_fp, "r", encoding = "utf-8") as f:
-            vocab_raw = json.load(f)
-        vocab:dict[int, bytes] = {}
-        for k, v in vocab_raw.items():
-            vocab[int(k)] = base64.b64decode(v)
-
-        # 读取 merges.json
-        with open(merges_fp, "r", encoding = "utf-8") as f:
-            merges_raw = json.load(f)
-        merges:list[tuple[bytes, bytes]] = []
-        for item in merges_raw:
-            a = base64.b64decode(item[0])
-            b = base64.b64decode(item[1])
-            merges.append((a, b))
-
-        return cls(vocab, merges, special_tokens = special_tokens)
-
-
-
-
-
-
-
-
-
