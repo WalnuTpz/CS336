@@ -246,6 +246,14 @@ class Tokenizer:
                 self.id_to_bytes[b_id] = b      # 将 token 和 id 加入词表和反向词表
                 self.bytes_to_id[b] = b_id
             self.special_id[tok] = b_id
+        if self.special_set:
+            # 将 special set 排序，防止某个 special token 是另一个的子串时分割出错
+            special_sorted = sorted(self.special_set, key = len, reverse = True)
+            # 将排序后的 special token 修改为正则格式，用于后续对 text 进行分割
+            delimit = "|".join(re.escape(tok) for tok in special_sorted)
+            self._special_re = re.compile(f"({delimit})")
+        else:
+            self._special_re = None
 
         # 将 merges 中生成的所有新 token 的 rank,id 加入字典
         self.pair_rank: dict[tuple[int, int], int] = {}
@@ -258,7 +266,7 @@ class Tokenizer:
             self.pair_rank[id_pair] = i
             self.pair_id[id_pair] = new_id
 
-        self.bpe_cache: dict[bytes, tuple[int, ...]] = {}
+        self.bpe_cache: dict[bytes, tuple[int, ...]] = {}      # 用来储存 bytes 对应的 ids，便于后续复用
 
     @classmethod
     def from_files(     # 从文件中读取 vocab 和 merges 用来构造 Tokenizer 类
@@ -326,10 +334,7 @@ class Tokenizer:
 
     def encode(self, text: str):    # 将文本转换为编码
         if self.special_set:
-            # 将 special set 排序后再进行匹配，防止某个 special token 是另一个的子串时匹配出错
-            sorted_special_set = sorted(self.special_set, key = len, reverse = True)
-            delimit = "|".join(re.escape(tok) for tok in sorted_special_set)
-            parts = re.split(f"({delimit})", text)
+            parts = self._special_re.split(text)
         else:
             parts = [text]
 
