@@ -91,7 +91,6 @@ def run_swiglu(
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
     swiglu = SwiGLUFFN(d_model, d_ff, device=in_features.device, dtype=in_features.dtype)
-
     swiglu.load_state_dict({
         "w1.weight": w1_weight,
         "w2.weight": w2_weight,
