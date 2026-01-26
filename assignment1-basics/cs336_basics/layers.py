@@ -3,8 +3,7 @@ from __future__ import annotations
 import math
 import torch
 import torch.nn as nn
-from torch import Tensor
-from einops import rearrange, einsum
+from torch import Tensor, einsum
 
 class Linear(nn.Module):
     def __init__(
@@ -24,7 +23,7 @@ class Linear(nn.Module):
         nn.init.trunc_normal_(self.weight, mean=0.0, std=std, a=-3 * std, b=3 * std)
 
     def forward(self, x: Tensor) -> Tensor:
-        y = einsum(self.weight, x, "d_out d_in, ... d_in -> ... d_out")     # 线性层操作 y = weight * x
+        y = einsum("... d_in, d_out d_in -> ... d_out", x, self.weight)     # 线性层操作 y = x * weight
         return y
 
 class Embedding(nn.Module):
@@ -55,6 +54,14 @@ class RMSNorm(nn.Module):
         dtype: torch.dtype | None = None,
     ):
         super().__init__()
+        self.eps = eps
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
+        w = torch.ones((dim, ), device=device, dtype=dtype)
+        self.weight = nn.Parameter(w)
+
+    def forward(self, x: torch.Tensor) -> Tensor:
+        x_float = x.float()     # 先转换为浮点数，防止爆精度
+        rms = torch.sqrt(torch.mean(x_float.pow(2), dim=-1, keepdim=True) + self.eps)     # rms 函数的分母
+        x_norm = x / rms.to(x.dtype)
+        x_rmsnorm = einsum("... d, d -> ... d", x_norm, self.weight)     # rmsnorm(x) = x_norm * weight
+        return x_rmsnorm
