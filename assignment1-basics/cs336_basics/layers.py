@@ -26,3 +26,16 @@ class Linear(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         y = einsum(self.weight, x, "d_out d_in, ... d_in -> ... d_out")
         return y
+
+class Embedding(nn.Module):
+    def __init__(
+        self,
+        num_embeddings: int,
+        embedding_dim: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+
+    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
