@@ -24,7 +24,7 @@ class Linear(nn.Module):
         nn.init.trunc_normal_(self.weight, mean=0.0, std=std, a=-3 * std, b=3 * std)
 
     def forward(self, x: Tensor) -> Tensor:
-        y = einsum(self.weight, x, "d_out d_in, ... d_in -> ... d_out")
+        y = einsum(self.weight, x, "d_out d_in, ... d_in -> ... d_out")     # 线性层操作 y = weight * x
         return y
 
 class Embedding(nn.Module):
@@ -44,4 +44,17 @@ class Embedding(nn.Module):
         nn.init.trunc_normal_(self.weight, mean=0.0, std=1.0, a=-3.0, b=3.0)
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
-        return self.weight[token_ids]
+        return self.weight[token_ids]      # 返回词表中对应的行向量
+
+class RMSNorm(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        eps: float = 1e-6,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
