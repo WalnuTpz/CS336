@@ -18,8 +18,8 @@ class Linear(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
 
-        weight_tensor = torch.empty((out_features, in_features), device = device, dtype = dtype)
-        self.weight = nn.Parameter(weight_tensor)
+        w = torch.empty((out_features, in_features), device=device, dtype=dtype)
+        self.weight = nn.Parameter(w)
         std = math.sqrt(2.0 / (in_features + out_features))
         nn.init.trunc_normal_(self.weight, mean=0.0, std=std, a=-3 * std, b=3 * std)
 
@@ -36,6 +36,12 @@ class Embedding(nn.Module):
         dtype: torch.dtype | None = None,
     ):
         super().__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+
+        w = torch.empty((num_embeddings, embedding_dim), device=device, dtype=dtype)
+        self.weight = nn.Parameter(w)
+        nn.init.trunc_normal_(self.weight, mean=0.0, std=1.0, a=-3.0, b=3.0)
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
+        return self.weight[token_ids]
