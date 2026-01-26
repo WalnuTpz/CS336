@@ -23,7 +23,7 @@ class Linear(nn.Module):
         nn.init.trunc_normal_(self.weight, mean=0.0, std=std, a=-3 * std, b=3 * std)
 
     def forward(self, x: Tensor) -> Tensor:
-        y = einsum("... d_in, d_out d_in -> ... d_out", x, self.weight)     # 线性层操作 y = x * weight
+        y = einsum("... d_in, d_out d_in -> ... d_out", x, self.weight)     # 线性层操作 y = weight * x
         return y
 
 class Embedding(nn.Module):
@@ -63,5 +63,18 @@ class RMSNorm(nn.Module):
         x_float = x.float()     # 先转换为浮点数，防止爆精度
         rms = torch.sqrt(torch.mean(x_float.pow(2), dim=-1, keepdim=True) + self.eps)     # rms 函数的分母
         x_norm = x / rms.to(x.dtype)
-        x_rmsnorm = einsum("... d, d -> ... d", x_norm, self.weight)     # rmsnorm(x) = x_norm * weight
+        x_rmsnorm = einsum("... d, d -> ... d", x_norm, self.weight)     # rmsnorm(x) = x_norm · weight
         return x_rmsnorm
+
+class SwiGLUFFN(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        d_ff: int | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
+        super().__init__()
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
