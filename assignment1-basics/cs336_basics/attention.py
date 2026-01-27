@@ -26,8 +26,9 @@ class RotaryPositionalEmbedding(nn.Module):
         angles = einsum(pos, inv_freq, "t, j -> t j")      # 位置和逆频率做外积得到角度
         cos = torch.cos(angles)
         sin = torch.sin(angles)
-        self.register_buffer("cos", cos, persistent=False)     # 将 cos, sin 注册为不可学习参数，并且不写进state_dict()
+        self.register_buffer("cos", cos, persistent=False)     # 将 cos, sin 注册为不可学习参数
         self.register_buffer("sin", sin, persistent=False)
+        # persistent=False 表示参数不写进state_dict()，让它可以根据不同的 d_k, max_seq_len 重新计算
 
     def forward(self, x: Tensor, token_positions: Tensor) -> Tensor:
         # x: (..., seq_len, d_k)
@@ -43,9 +44,16 @@ class RotaryPositionalEmbedding(nn.Module):
 
         return y
 
-def softmax(Tensor, dim: int) -> torch.Tensor:
+def softmax(x: Tensor, dim: int) -> Tensor:
     """
     Apply softmax over dimension `dim` with numerical stability.
     Output shape == input shape.
     """
-    raise NotImplementedError
+    mx = torch.max(x, dim=dim, keepdim=True).values
+    # keepdim=True 表示在进行 max/sum/mean 等操作以后保留被约掉的那一维，它的长度变为 1
+    x_shift = x - mx
+    exp_x = torch.exp(x_shift)
+    sum_exp_x = torch.sum(exp_x, dim=dim, keepdim=True)
+    out = exp_x / sum_exp_x
+
+    return out
