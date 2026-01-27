@@ -42,3 +42,10 @@ class RotaryPositionalEmbedding(nn.Module):
         y = torch.stack([y_even, y_odd], dim=-1).reshape_as(x)      # 将旋转后的张量交错放到 y 中
 
         return y
+
+def softmax(Tensor, dim: int) -> torch.Tensor:
+    """
+    Apply softmax over dimension `dim` with numerical stability.
+    Output shape == input shape.
+    """
+    raise NotImplementedError
