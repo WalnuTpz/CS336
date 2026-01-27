@@ -79,3 +79,16 @@ def scaled_dot_product_attention(      # 缩放点积注意力
 
     return out
 
+class MultiHeadSelfAttention(nn.Module):     # 多头自注意力
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        rope: nn.Module | None = None,
+        device=None,
+        dtype=None
+    ):
+        super().__init__()
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
