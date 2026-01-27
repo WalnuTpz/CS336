@@ -341,6 +341,7 @@ def run_transformer_block(
 
     return block(in_features)
 
+from cs336_basics.transformer import TransformerLM
 
 def run_transformer_lm(
     vocab_size: int,
@@ -421,7 +422,31 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    ref = next(iter(weights.values()))
+    device, dtype = ref.device, ref.dtype
+
+    model = TransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
+        device=device,
+        dtype=dtype,
+    )
+
+    mapped = dict(weights)
+    for i in range(num_layers):
+        base = f"layers.{i}.attn."
+        mapped[base + "w_q.weight"] = mapped.pop(base + "q_proj.weight")
+        mapped[base + "w_k.weight"] = mapped.pop(base + "k_proj.weight")
+        mapped[base + "w_v.weight"] = mapped.pop(base + "v_proj.weight")
+        mapped[base + "w_o.weight"] = mapped.pop(base + "output_proj.weight")
+
+    model.load_state_dict(mapped, strict=True)
+    return model(in_indices.to(device))
 
 from jaxtyping import Float
 from cs336_basics.layers import RMSNorm
