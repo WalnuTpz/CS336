@@ -66,6 +66,16 @@ def scaled_dot_product_attention(      # 缩放点积注意力
     V: Tensor,  # (..., keys, d_v)
     mask: Tensor | None = None,  # (..., queries, keys), bool
 ) -> Tensor:
+    d_k = Q.shape[-1]
+    # scores = (Q @ K^T) / sqrt(d_k)
+    scores = einsum(Q, K, "... queries d_k, ... keys d_k -> ... queries keys") / math.sqrt(d_k)
 
-    raise NotImplementedError
+    if mask is not None:     # 对 scores 进行掩码
+        scores = scores.masked_fill(~mask, -torch.inf)
+
+    # out = softmax(scores) * V
+    P = softmax(scores, dim=-1)
+    out = einsum(P, V, "... queries keys, ... keys d_v -> ...  queries d_v")
+
+    return out
 
