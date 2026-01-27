@@ -30,9 +30,11 @@ class RotaryPositionalEmbedding(nn.Module):     # 旋转位置编码
         self.register_buffer("sin", sin, persistent=False)
         # persistent=False 表示参数不写进state_dict()，让它可以根据不同的 d_k, max_seq_len 重新计算
 
-    def forward(self, x: Tensor, token_positions: Tensor) -> Tensor:
-        # x: (..., seq_len, d_k)
-        # token_positions: (..., seq_len)
+    def forward(
+        self,
+        x: Tensor,  # (..., seq_len, d_k)
+        token_positions: Tensor  # (..., seq_len)
+        ) -> Tensor:
         cos = self.cos[token_positions]
         sin = self.sin[token_positions]
         x_even = x[..., ::2]     # x 的偶数项
@@ -57,4 +59,13 @@ def softmax(x: Tensor, dim: int) -> Tensor:     # 软最大函数
     out = exp_x / sum_exp_x
 
     return out
+
+def scaled_dot_product_attention(      # 缩放点积注意力
+    Q: Tensor,  # (..., queries, d_k)
+    K: Tensor,  # (..., keys, d_k)
+    V: Tensor,  # (..., keys, d_v)
+    mask: Tensor | None = None,  # (..., queries, keys), bool
+) -> Tensor:
+
+    raise NotImplementedError
 

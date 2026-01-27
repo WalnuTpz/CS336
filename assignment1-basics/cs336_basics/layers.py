@@ -64,9 +64,9 @@ class RMSNorm(nn.Module):       # RMS 归一化
         x_float = x.float()     # 先转换为浮点数，防止爆精度
         rms = torch.sqrt(torch.mean(x_float.pow(2), dim=-1, keepdim=True) + self.eps)     # rms 函数的分母
         x_norm = x / rms.to(x.dtype)
-        x_rmsnorm = einsum(x_norm, self.weight, "... d, d -> ... d")     # rmsnorm(x) = x_norm · weight
+        out = einsum(x_norm, self.weight, "... d, d -> ... d")     # rmsnorm(x) = x_norm · weight
 
-        return x_rmsnorm
+        return out
 
 class SwiGLUFFN(nn.Module):     # SwiGLU 门控前馈层
     def __init__(
@@ -92,6 +92,6 @@ class SwiGLUFFN(nn.Module):     # SwiGLU 门控前馈层
         b = self.w3(x)      # b = w3 * x
         silu_a = a * torch.sigmoid(a)
         gated = silu_a * b
-        ffn = self.w2(gated)      # ffn = w2 * gated
+        out = self.w2(gated)      # ffn = w2 * gated
 
-        return ffn
+        return out
