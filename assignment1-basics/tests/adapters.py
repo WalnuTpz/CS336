@@ -121,6 +121,7 @@ def run_scaled_dot_product_attention(
     """
     return scaled_dot_product_attention(Q, K, V, mask=mask)
 
+from cs336_basics.attention import MultiHeadSelfAttention
 
 def run_multihead_self_attention(
     d_model: int,
@@ -153,8 +154,12 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    attn = MultiHeadSelfAttention(d_model, num_heads, rope=None, device=in_features.device, dtype=in_features.dtype)
+    attn.load_state_dict({"w_q.weight": q_proj_weight, "w_k.weight": k_proj_weight,
+                          "w_v.weight": v_proj_weight, "w_o.weight": o_proj_weight})
+    token_positions = torch.arange(in_features.shape[-2], device=in_features.device).expand(*in_features.shape[:-1])
 
+    return attn(in_features, token_positions)
 
 def run_multihead_self_attention_with_rope(
     d_model: int,
@@ -193,7 +198,12 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    rope = RotaryPositionalEmbedding(theta=theta, d_k=d_model // num_heads, max_seq_len=max_seq_len, device=in_features.device)
+    attn = MultiHeadSelfAttention(d_model, num_heads, rope=rope, device=in_features.device, dtype=in_features.dtype)
+    attn.load_state_dict({"w_q.weight": q_proj_weight, "w_k.weight": k_proj_weight,
+                          "w_v.weight": v_proj_weight, "w_o.weight": o_proj_weight})
+    token_positions = torch.arange(in_features.shape[-2], device=in_features.device).expand(*in_features.shape[:-1])
+    return attn(in_features, token_positions)
 
 from cs336_basics.attention import RotaryPositionalEmbedding
 

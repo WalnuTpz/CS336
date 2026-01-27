@@ -4,7 +4,8 @@ import math
 import torch
 import torch.nn as nn
 from torch import Tensor
-from einops import einsum
+from einops import einsum, rearrange
+from cs336_basics.layers import Linear
 
 class RotaryPositionalEmbedding(nn.Module):     # 旋转位置编码
     def __init__(
@@ -89,6 +90,48 @@ class MultiHeadSelfAttention(nn.Module):     # 多头自注意力
         dtype=None
     ):
         super().__init__()
+        self.d_model = d_model
+        self.h = num_heads
+        self.d_k = d_model // num_heads
+        self.rope = rope
 
-    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
+        self.w_q = Linear(self.d_model, self.h * self.d_k, device=device, dtype=dtype)
+        self.w_k = Linear(self.d_model, self.h * self.d_k, device=device, dtype=dtype)
+        self.w_v = Linear(self.d_model, self.h * self.d_k, device=device, dtype=dtype)
+        self.w_o = Linear(self.h * self.d_k, self.d_model, device=device, dtype=dtype)
+
+    def forward(
+        self,
+        x: Tensor,  # (batch, seq, d_model)
+        token_positions: Tensor
+    ) -> Tensor:
+        batch, seq, d_model = x.shape
+
+        # 把原始权重拆分成每个 head 的权重
+        Wq = rearrange(self.w_q.weight, "(h d_k) d_model -> h d_k d_model", h=self.h, d_k=self.d_k)
+        Wk = rearrange(self.w_k.weight, "(h d_k) d_model -> h d_k d_model", h=self.h, d_k=self.d_k)
+        Wv = rearrange(self.w_v.weight, "(h d_k) d_model -> h d_k d_model", h=self.h, d_k=self.d_k)
+
+        # 计算出 x 对应的 Q, K, V
+        Q = einsum(x, Wq, "batch seq d_model, h d_k d_model -> batch h seq d_k")
+        K = einsum(x, Wk, "batch seq d_model, h d_k d_model -> batch h seq d_k")
+        V = einsum(x, Wv, "batch seq d_model, h d_k d_model -> batch h seq d_k")
+
+        # 将 Q, K 进行旋转位置编码
+        if self.rope is not None:
+            pos = token_positions
+            if pos.dim() == 2:     # 将 pos 从二维扩展到三维，方便对齐
+                pos = pos[:, None, :]
+            Q = self.rope(Q, pos)
+            K = self.rope(K, pos)
+
+        # 构造下三角为 True 的 mask，使第 t 个位置只能关注 <= t 的 token
+        casual = torch.tril(torch.ones(seq, seq, device=x.device, dtype=torch.bool))
+        mask = casual[None, None, :, :]     # 将 casual 从二维扩展到四维，方便对齐
+
+        out = scaled_dot_product_attention(Q, K, V, mask=mask)      # 调用缩放点积注意力
+
+        Wo = rearrange(self.w_o.weight, "d_model (h d_k) -> d_model h d_k", h=self.h, d_k=self.d_k)
+        y = einsum(out, Wo, "batch h seq d_k, d_model h d_k -> batch seq d_model")      # 将多头结果合并回 d_model
+
+        return y
