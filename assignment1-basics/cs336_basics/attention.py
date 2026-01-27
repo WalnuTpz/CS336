@@ -6,7 +6,7 @@ import torch.nn as nn
 from torch import Tensor
 from einops import einsum
 
-class RotaryPositionalEmbedding(nn.Module):
+class RotaryPositionalEmbedding(nn.Module):     # 旋转位置编码
     def __init__(
         self,
         theta: float,
@@ -44,7 +44,7 @@ class RotaryPositionalEmbedding(nn.Module):
 
         return y
 
-def softmax(x: Tensor, dim: int) -> Tensor:
+def softmax(x: Tensor, dim: int) -> Tensor:     # 软最大函数
     """
     Apply softmax over dimension `dim` with numerical stability.
     Output shape == input shape.
@@ -57,3 +57,4 @@ def softmax(x: Tensor, dim: int) -> Tensor:
     out = exp_x / sum_exp_x
 
     return out
+

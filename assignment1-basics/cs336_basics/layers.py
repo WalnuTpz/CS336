@@ -6,7 +6,7 @@ import torch.nn as nn
 from torch import Tensor
 from einops import einsum
 
-class Linear(nn.Module):
+class Linear(nn.Module):     # 线性层（无 bias）
     def __init__(
         self,
         in_features: int,
@@ -27,7 +27,7 @@ class Linear(nn.Module):
         y = einsum(x, self.weight, "... d_in, d_out d_in -> ... d_out")     # 线性层操作 y = weight * x
         return y
 
-class Embedding(nn.Module):
+class Embedding(nn.Module):     # 嵌入层
     def __init__(
         self,
         num_embeddings: int,
@@ -46,7 +46,7 @@ class Embedding(nn.Module):
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         return self.weight[token_ids]      # 返回词表中对应的行向量
 
-class RMSNorm(nn.Module):
+class RMSNorm(nn.Module):       # RMS 归一化
     def __init__(
         self,
         dim: int,
@@ -68,7 +68,7 @@ class RMSNorm(nn.Module):
 
         return x_rmsnorm
 
-class SwiGLUFFN(nn.Module):
+class SwiGLUFFN(nn.Module):     # SwiGLU 门控前馈层
     def __init__(
         self,
         d_model: int,
