@@ -50,7 +50,7 @@ class RMSNorm(nn.Module):       # RMS 归一化
     def __init__(
         self,
         dim: int,
-        eps: float = 1e-6,
+        eps: float = 1e-5,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ):

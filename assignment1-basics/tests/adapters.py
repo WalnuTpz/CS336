@@ -229,6 +229,7 @@ def run_rope(
     rope = RotaryPositionalEmbedding(theta=theta, d_k=d_k, max_seq_len=max_seq_len, device=in_query_or_key.device)
     return rope(in_query_or_key, token_positions)
 
+from cs336_basics.transformer import TransformerBlock
 
 def run_transformer_block(
     d_model: int,
@@ -300,7 +301,45 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    rope = RotaryPositionalEmbedding(
+        theta=theta,
+        d_k=d_model // num_heads,
+        max_seq_len=max_seq_len,
+        device=in_features.device,
+    )
+
+    block = TransformerBlock(
+        d_model=d_model,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope=rope,
+        device=in_features.device,
+        dtype=in_features.dtype,
+    )
+
+    w1 = weights["ffn.w1.weight"]
+    w2 = weights["ffn.w2.weight"]
+    w3 = weights["ffn.w3.weight"]
+    if w1.shape == (d_model, d_ff):
+        w1 = w1.T
+    if w2.shape == (d_ff, d_model):
+        w2 = w2.T
+    if w3.shape == (d_model, d_ff):
+        w3 = w3.T
+
+    block.load_state_dict({
+        "attn.w_q.weight": weights["attn.q_proj.weight"],
+        "attn.w_k.weight": weights["attn.k_proj.weight"],
+        "attn.w_v.weight": weights["attn.v_proj.weight"],
+        "attn.w_o.weight": weights["attn.output_proj.weight"],
+        "ln1.weight": weights["ln1.weight"],
+        "ffn.w1.weight": w1,
+        "ffn.w2.weight": w2,
+        "ffn.w3.weight": w3,
+        "ln2.weight": weights["ln2.weight"],
+    })
+
+    return block(in_features)
 
 
 def run_transformer_lm(
