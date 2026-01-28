@@ -1,6 +1,7 @@
 import torch
 from torch import Tensor
 
+
 def cross_entropy(    # 计算交叉熵（这里没有直接使用原公式，而是使用化简后的公式）
     logits: Tensor,  # (..., V)
     targets: Tensor  # (...)
@@ -18,6 +19,7 @@ def cross_entropy(    # 计算交叉熵（这里没有直接使用原公式，�
     out = (log_denom - logit_y).mean()  # (
 
     return out
+
 
 def perplexity(losses: Tensor) -> Tensor:    # 计算困惑度
     return torch.exp(losses.mean())

@@ -5,7 +5,8 @@ import math
 import torch
 from torch import Tensor
 
-class AdamW(torch.optim.Optimizer):
+
+class AdamW(torch.optim.Optimizer):    # AdamW 优化器
     def __init__(
         self,
         params,
@@ -60,3 +61,21 @@ class AdamW(torch.optim.Optimizer):
                 state["v"] = v
 
         return  loss
+
+def lr_cosine_schedule(    # 带 warmup 的 cosine 学习率调度
+    t: int,
+    alpha_max: float,
+    alpha_min: float,
+    T_w: int,
+    T_c: int,
+) -> float:
+    if t < T_w:
+        alpha_t = t * 1.0 / T_w * alpha_max
+    elif t <= T_c:
+        progress = (t - T_w) / (T_c - T_w)
+        cos = math.cos(progress * math.pi)
+        alpha_t = alpha_min + 1.0 / 2 * (1 + cos) * (alpha_max - alpha_min)
+    else:
+        alpha_t = alpha_min
+
+    return  alpha_t

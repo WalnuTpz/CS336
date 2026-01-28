@@ -6,6 +6,7 @@ from torch import Tensor
 from cs336_basics.layers import RMSNorm, SwiGLUFFN, Embedding, Linear
 from cs336_basics.attention import MultiHeadSelfAttention, RotaryPositionalEmbedding
 
+
 class TransformerBlock(nn.Module):    # Transformer 块
     """
     Pre-norm Transformer block (RMSNorm -> sublayer -> residual), with:
@@ -42,6 +43,7 @@ class TransformerBlock(nn.Module):    # Transformer 块
         y = h + self.ffn(self.ln2(h))    # FFN 子层
 
         return y
+
 
 class TransformerLM(nn.Module):    # Transformer 语言模型
     """

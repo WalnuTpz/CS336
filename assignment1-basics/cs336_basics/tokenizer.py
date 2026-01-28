@@ -11,6 +11,7 @@ from collections import Counter, defaultdict
 
 PAT = re.compile(r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""")
 
+
 def pretokenize_file(    # 对文本进行预分词
     input_path: str | os.PathLike,
     special_tokens: list[str],
@@ -45,6 +46,7 @@ def pretokenize_file(    # 对文本进行预分词
 
     return pretoken_counts
 
+
 class RevBytes:    # 反转字节类（用于后续建立大根堆）
     __slots__ = ("b",)
     def __init__(self, b: bytes): self.b = b
@@ -52,6 +54,7 @@ class RevBytes:    # 反转字节类（用于后续建立大根堆）
         return self.b > other.b    # 反转：让更大的 bytes “更小”
     def __eq__(self, other: object) -> bool:
         return isinstance(other, RevBytes) and self.b == other.b
+
 
 def merge(    # 单次合并操作
     pretoken_counts: Counter[tuple[int, ...]],
@@ -126,6 +129,7 @@ def merge(    # 单次合并操作
 
     return pretoken_counts, pair_counts, pair_sets, heap, vocab, merges
 
+
 def train_bpe(    # 主训练函数
     input_path: str | os.PathLike,
     vocab_size: int,
@@ -176,6 +180,7 @@ def train_bpe(    # 主训练函数
 
     return vocab, merges
 
+
 def train_bpe_from_counts(    # 给定 pretoken_counts 的训练函数
     pretoken_counts: Counter[tuple[int, ...]],
     vocab_size: int,
@@ -215,6 +220,7 @@ def train_bpe_from_counts(    # 给定 pretoken_counts 的训练函数
         )
 
     return vocab, merges
+
 
 class Tokenizer:
     def __init__(

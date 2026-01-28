@@ -7,6 +7,7 @@ from torch import Tensor
 from einops import einsum, rearrange
 from cs336_basics.layers import Linear
 
+
 class RotaryPositionalEmbedding(nn.Module):    # 旋转位置编码
     def __init__(
         self,
@@ -75,6 +76,7 @@ def scaled_dot_product_attention(    # 缩放点积注意力
     out = einsum(P, V, "... queries keys, ... keys d_v -> ...  queries d_v")
 
     return out
+
 
 class MultiHeadSelfAttention(nn.Module):    # 多头自注意力
     def __init__(
