@@ -1,9 +1,11 @@
 from __future__ import annotations
+
 from collections.abc import Callable
 from typing import Optional
 import math
 import torch
 from torch import Tensor
+from collections.abc import Iterable
 
 
 class AdamW(torch.optim.Optimizer):    # AdamW 优化器
@@ -79,3 +81,26 @@ def lr_cosine_schedule(    # 带 warmup 的 cosine 学习率调度
         alpha_t = alpha_min
 
     return  alpha_t
+
+def gradient_clipping(    # 梯度裁剪
+    parameters: Iterable[torch.nn.Parameter],
+    max_l2_norm: float,
+    eps: float = 1e-6
+) -> None:
+    params:list[torch.nn.Parameter] = list(parameters)
+    total_sq: float = 0    # 梯度总和
+
+    for p in params:
+        if p.grad is not None:    # 只考虑梯度不为零的参数
+            g = p.grad.detach().float()
+            total_sq += g.pow(2).sum()
+    total_norm = math.sqrt(total_sq)    # 梯度的 L2 范数
+
+    scale = max_l2_norm / (total_norm + eps)
+    scale = min(scale, 1.0)
+
+    for p in params:    # 将所有梯度进行裁剪
+        if p.grad is not None:
+            p.grad.mul_(scale)
+
+    return

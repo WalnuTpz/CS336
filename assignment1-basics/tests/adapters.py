@@ -548,6 +548,7 @@ def run_cross_entropy(
     """
     return cross_entropy(inputs, targets)
 
+from cs336_basics.optim import gradient_clipping
 
 def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float) -> None:
     """Given a set of parameters, clip their combined gradients to have l2 norm at most max_l2_norm.
@@ -558,7 +559,8 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
-    raise NotImplementedError
+    gradient_clipping(parameters, max_l2_norm)
+    return
 
 from cs336_basics.optim import AdamW
 
