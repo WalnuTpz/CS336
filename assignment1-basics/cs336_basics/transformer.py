@@ -6,7 +6,7 @@ from torch import Tensor
 from cs336_basics.layers import RMSNorm, SwiGLUFFN, Embedding, Linear
 from cs336_basics.attention import MultiHeadSelfAttention, RotaryPositionalEmbedding
 
-class TransformerBlock(nn.Module):
+class TransformerBlock(nn.Module):    # Transformer 块
     """
     Pre-norm Transformer block (RMSNorm -> sublayer -> residual), with:
       1) causal multi-head self-attention
@@ -33,17 +33,17 @@ class TransformerBlock(nn.Module):
         x: Tensor,  # (batch, seq, d_model)
         token_positions: Tensor | None = None,  # (batch, seq)
     ) -> Tensor:
-        if token_positions is None:     # 如果没有传入位置，就自动生成
+        if token_positions is None:    # 如果没有传入位置，就自动生成
             batch, seq = x.shape[0], x.shape[1]
-            # arange 产生张量 (seq,)，然后用 expand 广播成张量 (batch, seq)，也就是让每个 batch 都对应 [0..seq-1]
+            # arange 可以得到张量 (seq,)，然后用 expand 广播成张量 (batch, seq)，也就是让每个 batch 都对应 [0..seq-1]
             token_positions = torch.arange(seq, device=x.device).expand(batch, seq)
 
-        h = x + self.attn(self.ln1(x), token_positions)     # attention 子层
-        y = h + self.ffn(self.ln2(h))       # FFN 子层
+        h = x + self.attn(self.ln1(x), token_positions)    # attention 子层
+        y = h + self.ffn(self.ln2(h))    # FFN 子层
 
         return y
 
-class TransformerLM(nn.Module):
+class TransformerLM(nn.Module):    # Transformer 语言模型
     """
     Full Transformer Language Model:
       token_embeddings -> [num_layers * TransformerBlock] -> ln_final -> lm_head (logits)
@@ -95,13 +95,13 @@ class TransformerLM(nn.Module):
         idx: Tensor  # (batch, seq) int
     ) -> Tensor:
         B, T = idx.shape
-        x = self.token_embeddings(idx)      # 把 idx 查表变成向量 (batch, seq, d_model)
-        token_positions = torch.arange(T, device=idx.device).expand(B, T)       # (batch, seq)
+        x = self.token_embeddings(idx)    # 把 idx 查表变成张量 (batch, seq, d_model)
+        token_positions = torch.arange(T, device=idx.device).expand(B, T)    # (batch, seq)
 
-        for block in self.layers:       # 依次通过所有 transformer block
+        for block in self.layers:    # 依次通过所有 transformer block
             x = block(x, token_positions=token_positions)
 
-        x = self.ln_final(x)       # 最后进行一次 RMSNorm
-        logits = self.lm_head(x)       # 投影到词表 logits
+        x = self.ln_final(x)    # 最后进行一次 RMSNorm
+        logits = self.lm_head(x)    # 投影到词表后得到 logits: (batch, seq, vocab_size)
 
         return logits
