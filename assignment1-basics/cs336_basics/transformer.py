@@ -35,8 +35,8 @@ class TransformerBlock(nn.Module):    # Transformer 块
     ) -> Tensor:
         if token_positions is None:    # 如果没有传入位置，就自动生成
             batch, seq = x.shape[0], x.shape[1]
-            # arange 可以得到张量 (seq,)，然后用 expand 广播成张量 (batch, seq)，也就是让每个 batch 都对应 [0..seq-1]
             token_positions = torch.arange(seq, device=x.device).expand(batch, seq)
+            # arange 可以得到张量 (seq,)，然后用 expand 广播成张量 (batch, seq)，也就是让每个 batch 都对应 [0..seq-1]
 
         h = x + self.attn(self.ln1(x), token_positions)    # attention 子层
         y = h + self.ffn(self.ln2(h))    # FFN 子层
