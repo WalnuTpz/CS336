@@ -72,6 +72,9 @@ class RMSNorm(nn.Module):    # RMS 归一化
         return out
 
 
+def SiLU(x: Tensor) -> Tensor:    # SiLU 函数
+    return x * torch.sigmoid(x)
+
 class SwiGLUFFN(nn.Module):    # SwiGLU 门控前馈层
     def __init__(
         self,
@@ -94,8 +97,7 @@ class SwiGLUFFN(nn.Module):    # SwiGLU 门控前馈层
         # ffn = w2 * (SiLU(w1 * x) · (w3 * x))
         a = self.w1(x)    # a = w1 * x
         b = self.w3(x)    # b = w3 * x
-        silu_a = a * torch.sigmoid(a)
-        gated = silu_a * b
+        gated = SiLU(a) * b
         out = self.w2(gated)    # ffn = w2 * gated
 
         return out

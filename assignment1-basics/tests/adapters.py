@@ -476,6 +476,8 @@ def run_rmsnorm(
 
     return norm(in_features)
 
+from cs336_basics.layers import SiLU
+
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
     """Given a tensor of inputs, return the output of applying SiLU
     to each element.
@@ -487,7 +489,7 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+    return SiLU(in_features)
 
 from cs336_basics.data import get_batch
 
