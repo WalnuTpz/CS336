@@ -22,10 +22,10 @@ def pretokenize_file(    # 对文本进行预分词
 
     # 将原文本按照 special_token 进行分割
     if special_tokens and any(tok in text for tok in special_tokens):
-        delimit = "|".join(re.escape(tok) for tok in special_tokens)
-        # 把每个 special_token 的特殊字符加反斜杠转义以后再用 '|' 连接起来
-        parts = re.split(f"({delimit})", text)    # 用分隔符切割原文本，并让分隔符也出现在结果里
         special_set = set(special_tokens)
+        special_sorted = sorted(special_set, key=len, reverse=True)    # 将 special set 排序，防止某个 special token 是另一个的子串时分割出错
+        delimit = "|".join(re.escape(tok) for tok in special_sorted)            # 把每个 special_token 的特殊字符加反斜杠转义以后再用 '|' 连接起来
+        parts = re.split(f"({delimit})", text)    # 用分隔符切割原文本，并让分隔符也出现在结果里
     else:
         parts = [text]
         special_set = set()
@@ -136,13 +136,6 @@ def train_bpe(    # 主训练函数
     special_tokens: list[str],
     **kwargs,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
-    """
-    Train a byte-level BPE tokenizer.
-
-    Returns:
-        vocab: dict[int, bytes]
-        merges: list[tuple[bytes, bytes]]
-    """
     vocab: dict[int, bytes] = {}
     merges: list[tuple[bytes, bytes]] = []
     special_id: dict[str, int] = {}
@@ -186,10 +179,6 @@ def train_bpe_from_counts(    # 给定 pretoken_counts 的训练函数
     vocab_size: int,
     special_tokens: list[str],
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
-    """
-    Train BPE starting from pretoken_counts (Counter of byte-id tuples).
-    This lets external scripts do multiprocessing pretokenization and reuse our merge logic.
-    """
     vocab: dict[int, bytes] = {}
     merges: list[tuple[bytes, bytes]] = []
 
@@ -269,7 +258,7 @@ class Tokenizer:
             id_pair = (self.bytes_to_id[a], self.bytes_to_id[b])
             new_tok = a + b
             new_id = self.bytes_to_id[new_tok]
-            self.pair_rank[id_pair] = i
+            self.pair_rank[id_pair] = new_id
             self.pair_id[id_pair] = new_id
 
         self.bpe_cache: dict[bytes, tuple[int, ...]] = {}    # 用来储存 bytes 对应的 ids，便于后续复用
