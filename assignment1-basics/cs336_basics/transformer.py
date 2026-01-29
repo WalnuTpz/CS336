@@ -65,6 +65,7 @@ class TransformerLM(nn.Module):    # Transformer 语言模型
         dtype=None,
     ):
         super().__init__()
+        self.context_length = context_length
         d_k = d_model // num_heads
 
         rope = RotaryPositionalEmbedding(

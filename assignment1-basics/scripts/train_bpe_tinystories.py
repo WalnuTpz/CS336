@@ -322,3 +322,4 @@ def main() -> int:  # 训练入口：预分词统计 -> BPE 训练 -> 保存 voc
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
