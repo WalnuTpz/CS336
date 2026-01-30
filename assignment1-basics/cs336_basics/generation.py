@@ -46,20 +46,32 @@ def generate(    # 产生新的 tokens
     eos_token_id: int | None = None,
 ) -> Tensor:  # (B, T + <=max_new_tokens)
     model.eval()
+    batch = prompt_ids.shape[0]
     max_len = model.context_lenth
-    out = prompt_ids
+    out = prompt_ids    # 输出结果
+    finished = torch.zeros(batch, device=prompt_ids.device, dtype=torch.bool)    # 标记已生成结束的序列
+    eos_tensor = torch.full((batch, 1), eos_token_id, device=prompt_ids.device, dtype=prompt_ids.dtype)
 
     for _ in range(max_new_tokens):
         context = out[:, -max_len :]    # 保留 out 的最后至多 max_len 个元素
         logits = model(context)    # (B, T, V)，生成新的结果
-        next_logits = logits[:, -1, :]    # (B, V)
-        next_logits = next_logits / temperature    # 进行温度缩放
+        next_logits = logits[:, -1, :]    # (B, V)，将每个序列的最后一个元素作为新的 logits
+        if temperature > 0:
+            next_logits = next_logits / temperature    # 进行温度缩放
 
         # 进行 softmax 和核采样过滤
         probs = softmax(next_logits, dim=-1)
         probs = nucleus_filter(probs, top_p)
 
-        next_id = torch.multinomial(probs, num_samples=1)    # 随机抽取得到下一个 token
-        out = torch.cat([out, next_id], dim=1)    # 拼接到输出结果尾部
+        next_id = torch.multinomial(probs, num_samples=1)    # (B, 1)，随机抽取得到下一个 token
+        if eos_token_id is not None:
+            next_id = torch.where(finished[:, None], eos_tensor, next_id)    # 将已经生成结束的序列的下一个 token 强制变为 eos
+        out = torch.cat([out, next_id], dim=1)    # 将每个序列的下一个 token 拼接到输出结果尾部
+
+        if eos_token_id is not None:
+            finished_cur = next_id.squeeze(1) == eos_token_id  # (B, 1)，在这一步中有哪些序列生成结束了
+            finished |= finished_cur  # 将生成 eos 的序列编号更新到 finished
+            if finished.all():  # 所有序列都生成结束以后，直接退出
+                break
 
     return out

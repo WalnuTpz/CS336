@@ -6,7 +6,7 @@ import torch
 
 from cs336_basics.tokenizer import Tokenizer
 from cs336_basics.transformer import TransformerLM
-from cs336_basics.generation import generate  
+from cs336_basics.generation import generate
 
 
 def _dtype_from_str(dtype_str: str) -> torch.dtype:
@@ -97,8 +97,6 @@ def main() -> None:
         device=device_t,
         dtype=dtype,
     ).to(device_t)
-
-    model.context_lenth = args.context_length  # type: ignore[attr-defined]
 
     # 加载 checkpoint（train_transformer.py 存的是 {"model": state_dict, ...}）
     ckpt = torch.load(args.ckpt, map_location="cpu")
