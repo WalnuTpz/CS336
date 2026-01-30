@@ -8,20 +8,19 @@ from cs336_basics.generation import generate
 
 
 # -------- 你只需要改这里：路径 + 超参（必须和训练一致） --------
-CKPT_PATH = "PATH/ckpt_final_it001000.pt"
-VOCAB_PATH = "PATH/vocab.json"
-MERGES_PATH = "PATH/merges.json"
+CKPT_PATH = ""
+VOCAB_PATH = ""
+MERGES_PATH = ""
 
-CONTEXT_LENGTH = 1024
+CONTEXT_LENGTH = 256
 D_MODEL = 512
-NUM_LAYERS = 8
-NUM_HEADS = 8
-D_FF = 2048
+NUM_LAYERS = 4
+NUM_HEADS = 16
+D_FF = 1344
 ROPE_THETA = 10000.0
 EPS = 1e-5
 
 DTYPE = torch.float32  # 想用 bfloat16/float16 也行（CPU 上建议 float32）
-# ------------------------------------------------------------
 
 
 def main() -> None:

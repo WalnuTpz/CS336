@@ -47,7 +47,7 @@ def generate(    # 产生新的 tokens
 ) -> Tensor:  # (B, T + <=max_new_tokens)
     model.eval()
     batch = prompt_ids.shape[0]
-    max_len = model.context_lenth
+    max_len = model.context_length
     out = prompt_ids    # 输出结果
     finished = torch.zeros(batch, device=prompt_ids.device, dtype=torch.bool)    # 标记已生成结束的序列
     eos_tensor = torch.full((batch, 1), eos_token_id, device=prompt_ids.device, dtype=prompt_ids.dtype)
