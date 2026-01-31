@@ -50,12 +50,16 @@ def generate(    # 产生新的 tokens
     max_len = model.context_length
     out = prompt_ids    # 输出结果
     finished = torch.zeros(batch, device=prompt_ids.device, dtype=torch.bool)    # 标记已生成结束的序列
-    eos_tensor = torch.full((batch, 1), eos_token_id, device=prompt_ids.device, dtype=prompt_ids.dtype)
+    if eos_token_id is not None:
+        eos_tensor = torch.full((batch, 1), eos_token_id, device=prompt_ids.device, dtype=prompt_ids.dtype)
+    else:
+        eos_tensor = None
 
     for _ in range(max_new_tokens):
         context = out[:, -max_len :]    # 保留 out 的最后至多 max_len 个元素
         logits = model(context)    # (B, T, V)，生成新的结果
         next_logits = logits[:, -1, :]    # (B, V)，将每个序列的最后一个元素作为新的 logits
+        next_logits[:, eos_token_id] = next_logits[:, eos_token_id] / 1.6
         if temperature > 0:
             next_logits = next_logits / temperature    # 进行温度缩放
 

@@ -72,7 +72,7 @@ def scaled_dot_product_attention(    # 缩放点积注意力
         scores = scores.masked_fill(~mask, -torch.inf)
 
     # out = softmax(scores) * V
-    P = softmax(scores, dim=-1)
+    P = softmax(scores, dim=-1).to(V.dtype)
     out = einsum(P, V, "... queries keys, ... keys d_v -> ...  queries d_v")
 
     return out

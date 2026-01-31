@@ -56,7 +56,7 @@ def main() -> None:
     print("\n[ready] 输入 prompt 直接生成；输入 /q 退出；输入 /h 看帮助\n")
 
     # -------- REPL --------
-    temperature = 0.8
+    temperature = 1.1
     top_p = 0.9
     max_new_tokens = 128
 
