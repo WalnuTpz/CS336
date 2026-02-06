@@ -182,6 +182,7 @@ def main() -> None:
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--context_length", type=int, default=256)
     parser.add_argument("--rope_theta", type=float, default=10000.0)
+    parser.add_argument("--times_out", type=str, default=None, help="若提供，则把每步耗时(ms)写入该文件")
 
     # 运行控制
     parser.add_argument("--warmup_steps", type=int, default=5)
@@ -284,7 +285,10 @@ def main() -> None:
     print(f"throughput    : {tok_per_s:,.0f} tokens/s")
     print("======================================")
 
-    # 如果你想把每步数据导出到文件，方便做表格/画图，可以在这里写 np.savetxt / pandas
+    # 若指定 times_out，则导出每步耗时，便于后续画图/统计
+    if args.times_out:
+        np.savetxt(args.times_out, times_ms, fmt="%.6f")
+        print(f"[info] times saved to {args.times_out}")
 
 
 if __name__ == "__main__":
