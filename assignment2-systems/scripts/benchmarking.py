@@ -15,16 +15,16 @@
 from __future__ import annotations
 
 import argparse
-import inspect
 import timeit
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Dict, Tuple
 from pathlib import Path
 import sys
 
 import numpy as np
 import torch
 import torch.nn.functional as F
+from cs336_basics.model import BasicsTransformerLM
 
 
 # -----------------------------
@@ -50,36 +50,7 @@ SIZE_PRESETS: Dict[str, ModelSpec] = {
 # -----------------------------
 # 2) 选择并构造 basics Transformer 模型
 # -----------------------------
-def _pick_transformer_class(module: Any) -> type:
-    """
-    在 cs336_basics.model 里尽量找到“Transformer 语言模型”对应的类名。
-    为了兼容不同实现，这里做一些容错：
-      - 优先尝试常见类名
-      - 找不到再退化为“名字里包含 Transformer 的第一个类”
-    """
-    preferred_names = [
-        "TransformerLM",
-        "TransformerLanguageModel",
-        "TransformerModel",
-        "Transformer",
-    ]
-    for name in preferred_names:
-        if hasattr(module, name) and inspect.isclass(getattr(module, name)):
-            return getattr(module, name)
-
-    # 退化：找名字包含 Transformer 的类
-    for name, obj in vars(module).items():
-        if inspect.isclass(obj) and "Transformer" in name:
-            return obj
-
-    raise RuntimeError(
-        "在 cs336_basics.model 中没有找到 Transformer 相关的模型类。"
-        "请检查你的 cs336_basics.model 里模型类的名字。"
-    )
-
-
-def _build_model_from_signature(
-    ModelCls: type,
+def _build_model(
     *,
     vocab_size: int,
     context_length: int,
@@ -88,61 +59,24 @@ def _build_model_from_signature(
     num_layers: int,
     num_heads: int,
     rope_theta: float,
-) -> Any:
-    """
-    通过检查 __init__ 的参数名，把我们常见的超参数“对齐”进去。
-    这样可以尽量兼容不同同学/不同版本实现的构造函数参数名。
-    """
-    sig = inspect.signature(ModelCls.__init__)
-    params = sig.parameters
-
-    # 可能出现的“同义参数名”映射
-    def pick(name_candidates: Tuple[str, ...], value: Any, out: Dict[str, Any]):
-        for n in name_candidates:
-            if n in params:
-                out[n] = value
-                return
-
-    kwargs: Dict[str, Any] = {}
-
-    pick(("vocab_size", "n_vocab", "vocab"), vocab_size, kwargs)
-    pick(("context_length", "max_seq_len", "seq_len", "block_size"), context_length, kwargs)
-    pick(("d_model", "dim", "n_embd", "embed_dim"), d_model, kwargs)
-    pick(("d_ff", "ffn_dim", "mlp_dim", "d_hidden"), d_ff, kwargs)
-    pick(("num_layers", "n_layers", "n_layer"), num_layers, kwargs)
-    pick(("num_heads", "n_heads", "n_head"), num_heads, kwargs)
-
-    # RoPE theta：有的实现会要
-    pick(("rope_theta", "theta"), rope_theta, kwargs)
-
-    # 有些实现可能要求额外参数（例如 dropout），这里不强行传，避免不匹配
-    try:
-        model = ModelCls(**kwargs)
-    except TypeError as e:
-        # 如果你自己的实现构造函数参数名非常不一样，这里会报错
-        raise TypeError(
-            f"构造模型失败：{e}\n"
-            f"尝试传入的参数为：{kwargs}\n"
-            "请打开 cs336_basics/model.py 看看你的模型 __init__ 需要哪些参数名，"
-            "然后在 _build_model_from_signature 里补充同义参数名映射。"
-        )
-    return model
+):
+    return BasicsTransformerLM(
+        vocab_size=vocab_size,
+        context_length=context_length,
+        d_model=d_model,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
+    )
 
 
 # -----------------------------
 # 3) 单步 forward / forward+backward
 # -----------------------------
-def _run_forward_only(model: Any, x: torch.Tensor) -> torch.Tensor:
-    """
-    只跑 forward：返回 logits（或 forward 的输出）。
-    """
-    out = model(x)
-    # 有的模型可能返回 (logits, extra...) 或者一个带 logits 属性的对象
-    if isinstance(out, tuple) and len(out) > 0:
-        return out[0]
-    if hasattr(out, "logits"):
-        return out.logits
-    return out
+def _run_forward_only(model: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
+    """只跑 forward，直接返回 logits。"""
+    return model(x)
 
 
 def _compute_loss_from_logits(logits: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -172,7 +106,7 @@ def _sync_if_cuda(device: torch.device) -> None:
 # -----------------------------
 def benchmark(
     *,
-    model: Any,
+    model: torch.nn.Module,
     device: torch.device,
     x: torch.Tensor,
     y: torch.Tensor,
@@ -293,12 +227,8 @@ def main() -> None:
     basics_dir = repo_root / "cs336-basics"
     if str(basics_dir) not in sys.path:
         sys.path.insert(0, str(basics_dir))
-    # 导入 basics 模型
-    import cs336_basics.model as basics_model
 
-    ModelCls = _pick_transformer_class(basics_model)
-    model = _build_model_from_signature(
-        ModelCls,
+    model = _build_model(
         vocab_size=args.vocab_size,
         context_length=args.context_length,
         d_model=spec.d_model,
@@ -343,7 +273,7 @@ def main() -> None:
     print("========== Benchmark Result ==========")
     print(f"mode          : {mode}")
     print(f"device        : {device}")
-    print(f"dtype         : {dtype} (仅影响模型参数；输入 token 仍为 int64)")
+    print(f"dtype         : {dtype}")
     print(f"size          : {args.size}")
     print(f"spec          : d_model={spec.d_model}, d_ff={spec.d_ff}, num_layers={spec.num_layers}, num_heads={spec.num_heads}")
     print(f"batch/context : B={B}, T={T}, vocab_size={V}")
