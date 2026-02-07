@@ -18,12 +18,28 @@ import argparse
 import timeit
 from dataclasses import dataclass
 from typing import Dict, Tuple
+from contextlib import contextmanager
+import torch.cuda.nvtx as nvtx
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from cs336_basics.model import BasicsTransformerLM
 from cs336_basics.optimizer import AdamW
+
+
+# NVTX 标注，用于 Nsight Systems 里按 range 过滤/统计
+@contextmanager
+def nvtx_range(name: str, enabled: bool):
+    """NVTX range：enabled=False 或 CPU 时自动空操作。"""
+    if enabled and torch.cuda.is_available():
+        nvtx.range_push(name)
+        try:
+            yield
+        finally:
+            nvtx.range_pop()
+    else:
+        yield
 
 
 # 模型 size 预设
@@ -106,6 +122,7 @@ def benchmark(
     steps: int,
     do_backward: bool,
     do_optimizer_step: bool,
+    nvtx_enabled: bool,
 ) -> Tuple[float, float, np.ndarray]:
     """
     返回：
@@ -142,18 +159,25 @@ def benchmark(
     for _ in range(steps):
         t0 = timer()
 
-        if do_backward:
-            model.zero_grad(set_to_none=True)
-            logits = _run_forward_only(model, x)
-            loss = _compute_loss_from_logits(logits, y)
-            loss.backward()
+        with nvtx_range("PROFILE_STEP", enabled=nvtx_enabled):
+            if do_backward:
+                model.zero_grad(set_to_none=True)
 
-            if do_optimizer_step:
-                assert optimizer is not None
-                optimizer.step()
-        else:
-            with torch.no_grad():
-                _ = _run_forward_only(model, x)
+                with nvtx_range("forward", enabled=nvtx_enabled):
+                    logits = _run_forward_only(model, x)
+                    loss = _compute_loss_from_logits(logits, y)
+
+                with nvtx_range("backward", enabled=nvtx_enabled):
+                    loss.backward()
+
+                if do_optimizer_step:
+                    assert optimizer is not None
+                    with nvtx_range("optimizer", enabled=nvtx_enabled):
+                        optimizer.step()
+            else:
+                with torch.no_grad():
+                    with nvtx_range("forward", enabled=nvtx_enabled):
+                        _ = _run_forward_only(model, x)
 
         # 题目要求：每一步后 synchronize
         _sync_if_cuda(device)
@@ -194,8 +218,12 @@ def main() -> None:
     parser.add_argument("--dtype", type=str, default="fp16", choices=["fp32", "fp16", "bf16"])
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--optimizer_step", action="store_true", help="跑 optimizer.step()（完整训练一步）")
+    parser.add_argument("--nvtx", action="store_true", help="开启 NVTX ranges（用于 nsys 过滤/统计）")
 
     args = parser.parse_args()
+
+    if args.optimizer_step and not args.backward:
+        raise ValueError("--optimizer_step 需要配合 --backward（完整训练一步：forward+backward+optimizer）")
 
     # 设备选择
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -260,12 +288,15 @@ def main() -> None:
 
     mean_ms, std_ms, times_ms = benchmark(
         model=model,
+        optimizer=optimizer,
         device=device,
         x=x,
         y=y,
         warmup_steps=args.warmup_steps,
         steps=args.steps,
         do_backward=args.backward,
+        do_optimizer_step=args.optimizer_step,
+        nvtx_enabled=args.nvtx,
     )
 
     mode = "forward+backward" if args.backward else "forward-only"
