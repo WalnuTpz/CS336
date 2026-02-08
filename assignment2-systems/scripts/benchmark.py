@@ -154,7 +154,8 @@ def benchmark(
     do_optimizer_step: bool,
     nvtx_enabled: bool,
     amp_ctx: contextlib.AbstractContextManager,
-    do_memory_profile: bool
+    do_memory_profile: bool,
+    memory_snapshot: str
 ) -> Tuple[float, float, np.ndarray]:
     """
     返回：
@@ -205,12 +206,12 @@ def benchmark(
             _run_one_step(nvtx_enabled)
 
         _sync_if_cuda(device)
-        torch.cuda.memory._dump_snapshot("memory_snapshot.pickle")    # 导出 snapshot，供 memory_viz 使用
+        torch.cuda.memory._dump_snapshot(memory_snapshot)    # 导出 snapshot，供 memory_viz 使用
         torch.cuda.memory._record_memory_history(enabled=None)    # 停止记录
 
         peak_alloc = torch.cuda.max_memory_allocated() / (1024 ** 2)
         peak_res = torch.cuda.max_memory_reserved() / (1024 ** 2)
-        print(f"[memory_profile] snapshot=memory_snapshot.pickle")
+        print(f"[memory_profile] snapshot={memory_snapshot}")
         print(f"[memory_profile] peak_allocated={peak_alloc:.1f} MiB, peak_reserved={peak_res:.1f} MiB")
 
         return 0.0, 0.0, np.array(0.0)    # 直接退出：本次运行只用于产出 snapshot
@@ -267,6 +268,7 @@ def main() -> None:
     parser.add_argument("--optimizer_step", action="store_true", help="跑 optimizer.step()（完整训练一步）")
     parser.add_argument("--nvtx", action="store_true", help="开启 NVTX ranges（用于 nsys 过滤/统计）")
     parser.add_argument("--memory_profile", action="store_true", help="启用 PyTorch memory history + dump snapshot(pickle) 给 memory_viz 用")
+    parser.add_argument("--memory_snapshot", type=str, default="memory_snapshot.pickle", help="dump 的 pickle 文件名/路径")
 
     args = parser.parse_args()
 
@@ -359,7 +361,8 @@ def main() -> None:
         do_optimizer_step=args.optimizer_step,
         nvtx_enabled=args.nvtx,
         amp_ctx=amp_context,
-        do_memory_profile=args.memory_profile
+        do_memory_profile=args.memory_profile,
+        memory_snapshot = memory_snapshot
     )
 
     if args.memory_profile:    # 若进行显存剖析则不需要打印后续内容
