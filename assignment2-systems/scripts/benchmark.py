@@ -362,7 +362,7 @@ def main() -> None:
         nvtx_enabled=args.nvtx,
         amp_ctx=amp_context,
         do_memory_profile=args.memory_profile,
-        memory_snapshot = memory_snapshot
+        memory_snapshot=args.memory_snapshot,
     )
 
     if args.memory_profile:    # 若进行显存剖析则不需要打印后续内容
