@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import timeit
 from dataclasses import dataclass
 from typing import Dict, Tuple
@@ -152,7 +153,8 @@ def benchmark(
     do_backward: bool,
     do_optimizer_step: bool,
     nvtx_enabled: bool,
-    amp_ctx: bool
+    amp_ctx: contextlib.AbstractContextManager,
+    do_memory_profile: bool
 ) -> Tuple[float, float, np.ndarray]:
     """
     返回：
@@ -166,26 +168,52 @@ def benchmark(
     else:
         model.eval()
 
-    # 预热：不计时
-    with nvtx_range("warm_up", enabled=nvtx_enabled):
-        for _ in range(warmup_steps):
-            if do_backward:
-                model.zero_grad(set_to_none=True)
+    def _run_one_step(nvtx_on: bool) -> None:    # 单步操作
+        if do_backward:
+            model.zero_grad(set_to_none=True)
 
+            with nvtx_range("forward", enabled=nvtx_on):    # 执行前向运算
                 with amp_ctx:
                     logits = _run_forward_only(model, x)
                 loss = _compute_loss_from_logits(logits.float(), y)
 
+            with nvtx_range("backward", enabled=nvtx_on):    # 执行反向运算
                 loss.backward()
 
-                if do_optimizer_step:
-                    assert optimizer is not None
+            if do_optimizer_step:    # 执行参数优化
+                with nvtx_range("optimizer", enabled=nvtx_on):
                     optimizer.step()
-            else:
-                with torch.no_grad():
+        else:
+            with torch.no_grad():
+                with nvtx_range("forward", enabled=nvtx_on):
                     with amp_ctx:
                         _ = _run_forward_only(model, x)
+
+    # 预热
+    with nvtx_range("warm_up", enabled=nvtx_enabled):
+        for _ in range(warmup_steps):
+            _run_one_step(nvtx_enabled)
             _sync_if_cuda(device)
+
+    # 进行显存剖析
+    if do_memory_profile:
+        _sync_if_cuda(device)
+        torch.cuda.memory._record_memory_history(max_entries=1000000)    # 开始记录显存分配历史（在 warm-up 之后）
+        torch.cuda.reset_peak_memory_stats()    # 重置峰值统计，让它只反映本次被剖析的那一步
+
+        with nvtx_range("PROFILE_STEP", enabled=nvtx_enabled):    # 只跑 1 个 step
+            _run_one_step(nvtx_enabled)
+
+        _sync_if_cuda(device)
+        torch.cuda.memory._dump_snapshot("memory_snapshot.pickle")    # 导出 snapshot，供 memory_viz 使用
+        torch.cuda.memory._record_memory_history(enabled=None)    # 停止记录
+
+        peak_alloc = torch.cuda.max_memory_allocated() / (1024 ** 2)
+        peak_res = torch.cuda.max_memory_reserved() / (1024 ** 2)
+        print(f"[memory_profile] snapshot=memory_snapshot.pickle")
+        print(f"[memory_profile] peak_allocated={peak_alloc:.1f} MiB, peak_reserved={peak_res:.1f} MiB")
+
+        return 0.0, 0.0, np.array(0.0)    # 直接退出：本次运行只用于产出 snapshot
 
     # 正式计时：记录每一步耗时
     times = []
@@ -195,26 +223,7 @@ def benchmark(
         t0 = timer()
 
         with nvtx_range("PROFILE_STEP", enabled=nvtx_enabled):
-            if do_backward:
-                model.zero_grad(set_to_none=True)
-
-                with nvtx_range("forward", enabled=nvtx_enabled):
-                    with amp_ctx:
-                        logits = _run_forward_only(model, x)
-                    loss = _compute_loss_from_logits(logits.float(), y)
-
-                with nvtx_range("backward", enabled=nvtx_enabled):
-                    loss.backward()
-
-                if do_optimizer_step:
-                    assert optimizer is not None
-                    with nvtx_range("optimizer", enabled=nvtx_enabled):
-                        optimizer.step()
-            else:
-                with torch.no_grad():
-                    with nvtx_range("forward", enabled=nvtx_enabled):
-                        with amp_ctx:
-                            _ = _run_forward_only(model, x)
+            _run_one_step(nvtx_enabled)
 
         # 题目要求：每一步后 synchronize
         _sync_if_cuda(device)
@@ -257,6 +266,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--optimizer_step", action="store_true", help="跑 optimizer.step()（完整训练一步）")
     parser.add_argument("--nvtx", action="store_true", help="开启 NVTX ranges（用于 nsys 过滤/统计）")
+    parser.add_argument("--memory_profile", action="store_true", help="启用 PyTorch memory history + dump snapshot(pickle) 给 memory_viz 用")
 
     args = parser.parse_args()
 
@@ -269,6 +279,8 @@ def main() -> None:
         device = torch.device("cpu")
     else:
         device = torch.device(args.device)
+    if args.memory_profile and device.type != "cuda":
+        raise ValueError("--memory_profile 只支持 CUDA（需要 torch.cuda.memory.*）")
 
     # dtype 选择（注意：输入 token 是 int64，不受 dtype 影响；dtype 主要影响模型参数）
     dtype_map = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
@@ -346,8 +358,12 @@ def main() -> None:
         do_backward=args.backward,
         do_optimizer_step=args.optimizer_step,
         nvtx_enabled=args.nvtx,
-        amp_ctx=amp_context
+        amp_ctx=amp_context,
+        do_memory_profile=args.memory_profile
     )
+
+    if args.memory_profile:    # 若进行显存剖析则不需要打印后续内容
+        return
 
     mode = "forward+backward" if args.backward else "forward-only"
     tokens_per_step = B * T
