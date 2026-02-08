@@ -20,10 +20,12 @@ from dataclasses import dataclass
 from typing import Dict, Tuple
 from contextlib import contextmanager
 import torch.cuda.nvtx as nvtx
-
+import math
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+import cs336_basics.model as model_mod
 from cs336_basics.model import BasicsTransformerLM
 from cs336_basics.optimizer import AdamW
 
@@ -110,11 +112,38 @@ def _sync_if_cuda(device: torch.device) -> None:
         torch.cuda.synchronize()
 
 
+# 带 NVTX range 的 scaled_dot_product_attention
+def annotated_scaled_dot_product_attention(Q, K, V, mask=None):
+    d_k = K.shape[-1]
+
+    # 1) QK^T matmul
+    with nvtx_range("attn/qk_matmul", enabled=True):
+        attention_scores = model_mod.einsum(
+            Q, K, "... query d_k, ... key d_k -> ... query key"
+        ) / math.sqrt(d_k)
+
+    # 2) mask（可选，但通常很快；放着不影响）
+    if mask is not None:
+        with nvtx_range("attn/mask", enabled=True):
+            attention_scores = torch.where(mask, attention_scores, float("-inf"))
+
+    # 3) softmax
+    with nvtx_range("attn/softmax", enabled=True):
+        attention_weights = model_mod.softmax(attention_scores, dim=-1)
+
+    # 4) PV matmul
+    with nvtx_range("attn/pv_matmul", enabled=True):
+        out = model_mod.einsum(
+            attention_weights, V, "... query key, ... key d_v -> ... query d_v"
+        )
+    return out
+
+
 # Benchmark 主流程
 def benchmark(
     *,
     model: torch.nn.Module,
-    optimizer: AdamW | None,
+    optimizer: torch.nn.Module | None,
     device: torch.device,
     x: torch.Tensor,
     y: torch.Tensor,
@@ -137,20 +166,21 @@ def benchmark(
         model.eval()
 
     # 预热：不计时
-    for _ in range(warmup_steps):
-        if do_backward:
-            model.zero_grad(set_to_none=True)
-            logits = _run_forward_only(model, x)
-            loss = _compute_loss_from_logits(logits, y)
-            loss.backward()
+    with nvtx_range("warm_up", enabled=nvtx_enabled):
+        for _ in range(warmup_steps):
+            if do_backward:
+                model.zero_grad(set_to_none=True)
+                logits = _run_forward_only(model, x)
+                loss = _compute_loss_from_logits(logits, y)
+                loss.backward()
 
-            if do_optimizer_step:
-                assert optimizer is not None
-                optimizer.step()
-        else:
-            with torch.no_grad():
-                _ = _run_forward_only(model, x)
-        _sync_if_cuda(device)
+                if do_optimizer_step:
+                    assert optimizer is not None
+                    optimizer.step()
+            else:
+                with torch.no_grad():
+                    _ = _run_forward_only(model, x)
+            _sync_if_cuda(device)
 
     # 正式计时：记录每一步耗时
     times = []
@@ -255,6 +285,10 @@ def main() -> None:
         num_heads = args.num_heads if args.num_heads is not None else spec.num_heads
         spec = ModelSpec(d_model=d_model, d_ff=d_ff, num_layers=num_layers, num_heads=num_heads)
 
+    # 创建模型
+    _orig_sdp = model_mod.scaled_dot_product_attention
+    if args.nvtx:
+        model_mod.scaled_dot_product_attention = annotated_scaled_dot_product_attention
     model = _build_model(
         vocab_size=args.vocab_size,
         context_length=args.context_length,
