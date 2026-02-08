@@ -18,7 +18,7 @@ import argparse
 import timeit
 from dataclasses import dataclass
 from typing import Dict, Tuple
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import torch.cuda.nvtx as nvtx
 import math
 import numpy as np
@@ -152,6 +152,7 @@ def benchmark(
     do_backward: bool,
     do_optimizer_step: bool,
     nvtx_enabled: bool,
+    amp_ctx: bool
 ) -> Tuple[float, float, np.ndarray]:
     """
     返回：
@@ -170,8 +171,11 @@ def benchmark(
         for _ in range(warmup_steps):
             if do_backward:
                 model.zero_grad(set_to_none=True)
-                logits = _run_forward_only(model, x)
-                loss = _compute_loss_from_logits(logits, y)
+
+                with amp_ctx:
+                    logits = _run_forward_only(model, x)
+                loss = _compute_loss_from_logits(logits.float(), y)
+
                 loss.backward()
 
                 if do_optimizer_step:
@@ -179,7 +183,8 @@ def benchmark(
                     optimizer.step()
             else:
                 with torch.no_grad():
-                    _ = _run_forward_only(model, x)
+                    with amp_ctx:
+                        _ = _run_forward_only(model, x)
             _sync_if_cuda(device)
 
     # 正式计时：记录每一步耗时
@@ -194,8 +199,9 @@ def benchmark(
                 model.zero_grad(set_to_none=True)
 
                 with nvtx_range("forward", enabled=nvtx_enabled):
-                    logits = _run_forward_only(model, x)
-                    loss = _compute_loss_from_logits(logits, y)
+                    with amp_ctx:
+                        logits = _run_forward_only(model, x)
+                    loss = _compute_loss_from_logits(logits.float(), y)
 
                 with nvtx_range("backward", enabled=nvtx_enabled):
                     loss.backward()
@@ -207,7 +213,8 @@ def benchmark(
             else:
                 with torch.no_grad():
                     with nvtx_range("forward", enabled=nvtx_enabled):
-                        _ = _run_forward_only(model, x)
+                        with amp_ctx:
+                            _ = _run_forward_only(model, x)
 
         # 题目要求：每一步后 synchronize
         _sync_if_cuda(device)
@@ -246,6 +253,7 @@ def main() -> None:
     parser.add_argument("--backward", action="store_true", help="若指定则跑 forward+backward；否则只跑 forward")
     parser.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"])
     parser.add_argument("--dtype", type=str, default="fp16", choices=["fp32", "fp16", "bf16"])
+    parser.add_argument("--amp_bf16", action="store_true", help = "启用自动混合精度，让部分计算用 bfloat16 来跑，但模型权重仍保持 fp32")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--optimizer_step", action="store_true", help="跑 optimizer.step()（完整训练一步）")
     parser.add_argument("--nvtx", action="store_true", help="开启 NVTX ranges（用于 nsys 过滤/统计）")
@@ -265,6 +273,13 @@ def main() -> None:
     # dtype 选择（注意：输入 token 是 int64，不受 dtype 影响；dtype 主要影响模型参数）
     dtype_map = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
     dtype = dtype_map[args.dtype]
+
+    # 是否启用混合精度
+    amp_context = (
+        torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+        if (args.amp_bf16 and device.type == "cuda")
+        else nullcontext()
+    )
 
     torch.manual_seed(args.seed)
     if device.type == "cuda":
@@ -301,7 +316,7 @@ def main() -> None:
 
     # 把模型放到设备上，并设置参数 dtype
     model = model.to(device=device)
-    if device.type == "cuda":
+    if device.type == "cuda" and not args.amp_bf16:
         model = model.to(dtype=dtype)
 
     optimizer = None
@@ -331,6 +346,7 @@ def main() -> None:
         do_backward=args.backward,
         do_optimizer_step=args.optimizer_step,
         nvtx_enabled=args.nvtx,
+        amp_ctx=amp_context
     )
 
     mode = "forward+backward" if args.backward else "forward-only"
@@ -342,6 +358,7 @@ def main() -> None:
     print(f"mode          : {mode}")
     print(f"device        : {device}")
     print(f"dtype         : {dtype}")
+    print(f"amp_bf16      : {args.amp_bf16}")
     print(f"size          : {args.size}")
     print(f"spec          : d_model={spec.d_model}, d_ff={spec.d_ff}, num_layers={spec.num_layers}, num_heads={spec.num_heads}")
     print(f"batch/context : B={B}, T={T}, vocab_size={V}")
