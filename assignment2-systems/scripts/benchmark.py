@@ -269,6 +269,9 @@ def main() -> None:
     parser.add_argument("--nvtx", action="store_true", help="开启 NVTX ranges（用于 nsys 过滤/统计）")
     parser.add_argument("--memory_profile", action="store_true", help="启用 PyTorch memory history + dump snapshot(pickle) 给 memory_viz 用")
     parser.add_argument("--memory_snapshot", type=str, default="memory_snapshot.pickle", help="dump 的 pickle 文件名/路径")
+    parser.add_argument("--compile", action="store_true")
+    parser.add_argument("--compile_mode", default="default", choices=["default", "reduce-overhead", "max-autotune"])
+    parser.add_argument("--fullgraph", action="store_true")
 
     args = parser.parse_args()
 
@@ -333,6 +336,11 @@ def main() -> None:
     if device.type == "cuda" and not args.amp_bf16:
         model = model.to(dtype=dtype)
 
+    # 对模型进行编译
+    if args.compile and device.type == "cuda":
+        model = torch.compile(model, mode=args.compile_mode, fullgraph=args.fullgraph)
+
+    # 创建优化器
     optimizer = None
     if args.optimizer_step:
         optimizer = AdamW(model.parameters(), lr=args.lr)
