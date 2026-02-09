@@ -1,5 +1,5 @@
 """
-一个 benchmark 脚本：固定 batch size=8、移除 head 维度，
+一个 attention_benchmark 脚本：固定 batch size=8、移除 head 维度，
 遍历 (d_model, seq_len) 的组合，测 attention 的 forward / backward 耗时与显存。
 
 - d_model ∈ [16, 32, 64, 128]
@@ -123,6 +123,10 @@ def main():
     p.add_argument("--device", default="cuda")
     p.add_argument("--iters", type=int, default=100)
     p.add_argument("--warmup", type=int, default=10)
+    p.add_argument("--compile", action="store_true", help="使用 torch.compile 将 attention 进行编译")
+    p.add_argument("--compile_mode", default="default", choices=["default", "reduce-overhead", "max-autotune"])
+    p.add_argument("--fullgraph", action="store_true")
+
     args = p.parse_args()
 
     assert args.device == "cuda", "本题要求 cuda benchmark"
@@ -136,6 +140,8 @@ def main():
         dtype = torch.float32
 
     attn = get_attention_fn(args.impl)
+    if args.compile:  # 触发编译
+        attn = torch.compile(attn, mode=args.compile_mode, fullgraph=args.fullgraph)
 
     B = 8
     d_models = [16, 32, 64, 128]
@@ -164,6 +170,10 @@ def main():
                 k = torch.randn(B, L, d, device="cuda", dtype=dtype, requires_grad=True)
                 v = torch.randn(B, L, d, device="cuda", dtype=dtype, requires_grad=True)
 
+                if args.compile:    # 触发编译（不要把编译时间算进计时）
+                    _ = attn(q, k, v)
+                    torch.cuda.synchronize()
+
                 # 进行 100 次 forward 计时
                 # noinspection PyTypeChecker
                 row["fwd_ms"] = time_forward(attn, q, k, v, iters=args.iters, warmup=args.warmup)
@@ -181,6 +191,7 @@ def main():
                     # 清理 OOM 后的状态
                     del q, k, v
                     torch.cuda.empty_cache()
+                    torch.cuda.reset_peak_memory_stats()
                     torch.cuda.synchronize()
                 else:
                     row["status"] = f"error: {type(e).__name__}"
