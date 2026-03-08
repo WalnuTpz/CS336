@@ -9,13 +9,13 @@
 
 用法示例：
   # bf16，默认 iters=100, warmup=10
-  uv run python scripts/pytorch_attention_benchmark.py --dtype bf16
+  uv run python scripts/attention_benchmark.py --dtype bf16
 
   # 自定义迭代次数 / warmup
-  uv run python scripts/pytorch_attention_benchmark.py --dtype bf16 --warmup 5 --iters 50
+  uv run python scripts/attention_benchmark.py --dtype bf16 --warmup 5 --iters 50
 
   # fp32（更慢但更稳）
-  uv run python scripts/pytorch_attention_benchmark.py --dtype fp32 --warmup 5 --iters 50
+  uv run python scripts/attention_benchmark.py --dtype fp32 --warmup 5 --iters 50
 """
 import argparse
 import traceback
