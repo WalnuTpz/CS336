@@ -7,13 +7,13 @@ from einops import einsum
 class FlashAttentionForwardPytorch(torch.autograd.Function):
     @staticmethod
     def forward(
-            ctx,
-            Q: Tensor,  # (..., N, D)
-            K: Tensor,  # (..., N, D)
-            V: Tensor,  # (..., N, D)
-            is_causal: bool = False,
+        ctx,
+        Q: Tensor,  # (..., N, D)
+        K: Tensor,  # (..., N, D)
+        V: Tensor,  # (..., N, D)
+        is_causal: bool = False,
     ) -> Tensor:  # (..., N, D)
-        *batch_dims, N, D = Q.shape
+        *batch_dims, N, D = Q.shape  # *batch_dims 可以支持一维或二维的前导维度
         scale = 1.0 / math.sqrt(D)
         BLOCK_M = 16
         BLOCK_N = 16
