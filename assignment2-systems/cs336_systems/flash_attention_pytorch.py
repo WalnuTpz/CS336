@@ -29,6 +29,7 @@ def _flash_backward_pytorch_impl(
 ) -> tuple[Tensor, Tensor, Tensor]:
     *batch_dims, N, D = Q.shape
     scale = 1.0 / math.sqrt(D)
+    BLOCK_M, BLOCK_N = _pick_flash_block_sizes(N, D)
 
     # 为了数值稳定，内部统一用 float32
     Qf = Q.float()
@@ -38,26 +39,48 @@ def _flash_backward_pytorch_impl(
     dOf = dO.float()
     Lf = L.float()
 
-    # S = Q @ K^T / sqrt(D)
-    S = torch.matmul(Qf, Kf.transpose(-2, -1)) * scale  # (..., N, N)
-    causal_mask = None
-    if is_causal:
-        q_idx = torch.arange(N, device=Q.device)
-        k_idx = torch.arange(N, device=Q.device)
-        causal_mask = q_idx[:, None] >= k_idx[None, :]  # (N, N)
-        S = torch.where(causal_mask, S, torch.full_like(S, -1.0e6))
-
-    # P = exp(S - L)
-    P = torch.exp(S - Lf.unsqueeze(-1))  # (..., N, N)
-    if is_causal:
-        P = torch.where(causal_mask, P, torch.zeros_like(P))
-
     D_vec = torch.sum(dOf * Of, dim=-1)  # (..., N), D vector: D_i = sum_d dO_i[d] * O_i[d]
-    dVf = torch.matmul(P.transpose(-2, -1), dOf)  # (..., N, D), dP = dO @ V^T
-    dP = torch.matmul(dOf, Vf.transpose(-2, -1))  # (..., N, N), dP = dO @ V^T
-    dS = P * (dP - D_vec.unsqueeze(-1))  # (..., N, N), dS = P * (dP - D)
-    dQf = scale * torch.matmul(dS, Kf)  # (..., N, D), dQ = scale * dS @ K
-    dKf = scale * torch.matmul(dS.transpose(-2, -1), Qf)  # (..., N, D), dK = scale * dS^T @ Q
+    dQf = torch.zeros_like(Qf)
+    dKf = torch.zeros_like(Kf)
+    dVf = torch.zeros_like(Vf)
+
+    for j in range(0, N, BLOCK_N):
+        j_end = min(j + BLOCK_N, N)
+        Kj = Kf[..., j:j_end, :]  # (..., Nj, D)
+        Vj = Vf[..., j:j_end, :]  # (..., Nj, D)
+        dKj = torch.zeros((*batch_dims, j_end - j, D), device=Q.device, dtype=torch.float32)
+        dVj = torch.zeros((*batch_dims, j_end - j, D), device=Q.device, dtype=torch.float32)
+        if is_causal:
+            k_idx = torch.arange(j, j_end, device=Q.device)
+
+        # 固定当前 kv block，遍历所有 q block 来累计 dK_j 和 dV_j，并顺带更新 dQ
+        for i in range(0, N, BLOCK_M):
+            i_end = min(i + BLOCK_M, N)
+            Qi = Qf[..., i:i_end, :]  # (..., Mi, D)
+            dOi = dOf[..., i:i_end, :]  # (..., Mi, D)
+            Li = Lf[..., i:i_end]  # (..., Mi)
+            Di = D_vec[..., i:i_end]  # (..., Mi)
+            if is_causal:
+                q_idx = torch.arange(i, i_end, device=Q.device)
+
+            # S_i^(j) = Q_i @ K_j^T / sqrt(D)
+            Sij = einsum(Qi, Kj, "... q d, ... k d -> ... q k") * scale
+            if is_causal:
+                causal_mask = q_idx[:, None] >= k_idx[None, :]
+                Sij = torch.where(causal_mask, Sij, torch.full_like(Sij, float("-inf")))
+
+            # P_i^(j) = exp(S_i^(j) - L_i)，dP_i^(j) = dO_i @ V_j^T
+            Pij = torch.exp(Sij - Li.unsqueeze(-1))
+            dPij = torch.matmul(dOi, Vj.transpose(-2, -1))
+            # dS_i^(j) = P_i^(j) * (dP_i^(j) - D_i)
+            dSij = Pij * (dPij - Di.unsqueeze(-1))
+
+            dVj = dVj + torch.matmul(Pij.transpose(-2, -1), dOi)
+            dKj = dKj + scale * torch.matmul(dSij.transpose(-2, -1), Qi)
+            dQf[..., i:i_end, :] = dQf[..., i:i_end, :] + scale * torch.matmul(dSij, Kj)
+
+        dKf[..., j:j_end, :] = dKj
+        dVf[..., j:j_end, :] = dVj
 
     dQ = dQf.to(Q.dtype)
     dK = dKf.to(K.dtype)
