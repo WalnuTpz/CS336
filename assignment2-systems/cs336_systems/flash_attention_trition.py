@@ -105,6 +105,12 @@ def flash_fwd_kernel(
 
     o_i = o_i / l_i[:, None]
 
+    tl.store(O_block_ptr, o_i.to(O_block_ptr.type.element_ty), boundary_check=(0, 1))
+    L_ptrs = L_ptr + batch_index * stride_lb + offs_q * stride_lq
+    L_vals = m_i + tl.log(l_i)
+    tl.store(L_ptrs, L_vals, mask=valid_q)
+
+
 class FlashAttentionForwardTriton(torch.autograd.Function):
     @staticmethod
     def forward(
