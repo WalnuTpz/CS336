@@ -150,3 +150,21 @@ class DDPBucketed(_BaseDDP):
 
         for bucket in self.buckets:
             _average_bucket_gradients(bucket, self.world_size)
+
+
+class DDPFlatGradients(_BaseDDP):
+    def __init__(
+        self,
+        module: nn.Module,
+    ) -> None:    # 把所有梯度拼成一个扁平张量来同步的 DDP 包装器。
+        super().__init__(module)
+        self.grad_params = _iter_unique_parameters(
+            self.module,
+            requires_grad_only=True,
+        )
+
+    def finish_gradient_synchronization(self) -> None:    # backward 后只做一次扁平 all-reduce。
+        if self.world_size == 1:
+            return
+
+        _average_bucket_gradients(self.grad_params, self.world_size)
