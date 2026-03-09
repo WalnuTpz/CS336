@@ -42,24 +42,26 @@ DEFAULT_WORLD_SIZES = [2, 4, 6]
 DEFAULT_BACKENDS = ["gloo", "nccl"]
 
 
-def find_free_port() -> int:
+def find_free_port() -> int:    # 找一个本机可用端口，供本次进程组初始化使用。
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         s.listen(1)
         return int(s.getsockname()[1])
 
 
-def size_mb_to_numel(size_mb: int, dtype: torch.dtype = torch.float32) -> int:
+def size_mb_to_numel(
+    size_mb: int,
+    dtype: torch.dtype = torch.float32,
+) -> int:    # 把张量大小从 MB 换算成对应 dtype 下的元素个数。
     bytes_per_elem = torch.tensor([], dtype=dtype).element_size()
     size_bytes = size_mb * 1024 * 1024
     return size_bytes // bytes_per_elem
 
 
-def pick_warmup_and_iters(backend: str, size_mb: int) -> tuple[int, int]:
-    """
-    控制每个配置的总耗时。
-    CPU + Gloo 在大张量时会慢很多，因此迭代数更保守。
-    """
+def pick_warmup_and_iters(
+    backend: str,
+    size_mb: int,
+) -> tuple[int, int]:    # 按 backend 和张量大小选择更合适的 warm-up / iters。
     if backend == "gloo":
         if size_mb <= 1:
             return 5, 30
@@ -78,12 +80,15 @@ def pick_warmup_and_iters(backend: str, size_mb: int) -> tuple[int, int]:
     return 2, 8
 
 
-def sync_if_needed(device: torch.device) -> None:
+def sync_if_needed(device: torch.device) -> None:    # 只在 CUDA 上做同步，保证计时边界清晰。
     if device.type == "cuda":
         torch.cuda.synchronize(device)
 
 
-def get_device(backend: str, rank: int) -> torch.device:
+def get_device(
+    backend: str,
+    rank: int,
+) -> torch.device:    # 按 backend 选择当前 rank 应该绑定的设备。
     if backend == "nccl":
         torch.cuda.set_device(rank)
         return torch.device(f"cuda:{rank}")
@@ -99,7 +104,7 @@ def bench_worker(
     master_port: int,
     timeout_seconds: int,
     result_queue: Any,
-) -> None:
+) -> None:    # 单个 rank 的 worker：初始化进程组，执行 warm-up 和正式计时。
     # 每个子进程都用同一组 rendezvous 参数加入进程组。
     os.environ["MASTER_ADDR"] = master_addr
     os.environ["MASTER_PORT"] = str(master_port)
@@ -217,7 +222,7 @@ def run_one_config(
     size_mb: int,
     master_addr: str,
     timeout_seconds: int,
-) -> dict[str, Any]:
+) -> dict[str, Any]:    # 跑一个 (backend, world_size, size_mb) 配置并返回结果。
     if backend == "nccl":
         n_gpus = torch.cuda.device_count()
         if n_gpus < world_size:
@@ -297,7 +302,7 @@ def run_one_config(
     return result_queue.get()
 
 
-def print_table(results: list[dict[str, Any]]) -> None:
+def print_table(results: list[dict[str, Any]]) -> None:    # 把所有结果整理成终端汇总表。
     ok_rows = [row for row in results if row["status"] == "ok"]
     skip_rows = [row for row in results if row["status"] == "skipped"]
     err_rows = [row for row in results if row["status"] == "error"]
@@ -334,7 +339,7 @@ def print_table(results: list[dict[str, Any]]) -> None:
             )
 
 
-def main() -> None:
+def main() -> None:    # 解析参数，逐个配置执行 benchmark，并在最后统一输出。
     parser = argparse.ArgumentParser()
     parser.add_argument("--master_addr", type=str, default="127.0.0.1")
     parser.add_argument("--timeout_seconds", type=int, default=600)
