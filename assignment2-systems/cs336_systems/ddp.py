@@ -198,16 +198,97 @@ class DDPBucketed(_BaseDDP):
             grad_params,
             bucket_size_mb,
         )
+        self.bucket_param_ids = [
+            {id(param) for param in bucket}
+            for bucket in self.buckets
+        ]
+        self.bucket_ready_param_ids = [
+            set()
+            for _ in self.buckets
+        ]
+        self.pending_bucket_works: dict[int, tuple[dist.Work, torch.Tensor, list[torch.Tensor]]] = {}
+        self.hook_handles = []
 
-    def start_train_batch(self) -> None:    # 当前朴素实现没有异步状态，这里保持空操作。
-        return None
+        for bucket_idx, bucket in enumerate(self.buckets):
+            for param in bucket:
+                handle = param.register_post_accumulate_grad_hook(
+                    self._make_post_accumulate_hook(
+                        param,
+                        bucket_idx,
+                    )
+                )
+                self.hook_handles.append(handle)
 
-    def finish_gradient_synchronization(self) -> None:    # backward 后按 bucket 做 all-reduce。
+    def _make_post_accumulate_hook(
+        self,
+        param: nn.Parameter,
+        bucket_idx: int,
+    ):    # 为单个参数创建“bucket 一旦凑齐就异步 all-reduce”的 hook。
+        param_id = id(param)
+
+        def hook(grad_param: nn.Parameter) -> None:
+            if self.world_size == 1 or grad_param.grad is None:
+                return
+            if param_id in self.bucket_ready_param_ids[bucket_idx]:
+                return
+
+            self.bucket_ready_param_ids[bucket_idx].add(param_id)
+            # 当前 bucket 中所有参数梯度都就绪后，就立即发起一次扁平 all-reduce。
+            if self.bucket_ready_param_ids[bucket_idx] == self.bucket_param_ids[bucket_idx]:
+                self._launch_bucket_allreduce(bucket_idx)
+
+        return hook
+
+    def _launch_bucket_allreduce(
+        self,
+        bucket_idx: int,
+    ) -> None:    # 为一个 bucket 发起异步扁平 all-reduce，并保留中间张量直到 wait。
+        if bucket_idx in self.pending_bucket_works:
+            return
+
+        grads = [
+            param.grad
+            for param in self.buckets[bucket_idx]
+            if param.grad is not None
+        ]
+        if not grads:
+            return
+
+        flat_grad = torch.cat([grad.reshape(-1) for grad in grads])
+        work = dist.all_reduce(
+            flat_grad,
+            op=dist.ReduceOp.SUM,
+            async_op=True,
+        )
+        self.pending_bucket_works[bucket_idx] = (work, flat_grad, grads)
+
+    def start_train_batch(self) -> None:    # 每个训练步开始前清空 bucket 的就绪状态和未完成通信。
+        for ready_param_ids in self.bucket_ready_param_ids:
+            ready_param_ids.clear()
+        self.pending_bucket_works.clear()
+
+    def finish_gradient_synchronization(self) -> None:    # backward 后等待所有 bucket 通信完成，并把梯度拷回原张量。
         if self.world_size == 1:
             return
 
-        for bucket in self.buckets:
-            _average_bucket_gradients(bucket, self.world_size)
+        for bucket_idx in range(len(self.buckets)):
+            # 如果某个 bucket 还没被 hook 触发，这里兜底补发一次通信。
+            self._launch_bucket_allreduce(bucket_idx)
+
+        for bucket_idx in range(len(self.buckets)):
+            bucket_state = self.pending_bucket_works.pop(bucket_idx, None)
+            if bucket_state is None:
+                continue
+
+            work, flat_grad, grads = bucket_state
+            work.wait()
+            flat_grad.div_(self.world_size)
+
+            offset = 0
+            for grad in grads:
+                numel = grad.numel()
+                grad.copy_(flat_grad[offset : offset + numel].view_as(grad))
+                offset += numel
 
 
 class DDPFlatGradients(_BaseDDP):
