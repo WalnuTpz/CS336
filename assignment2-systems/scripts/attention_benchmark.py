@@ -1,49 +1,52 @@
 """
 一个 attention_benchmark 脚本：固定 batch size=8、移除 head 维度，
-遍历 (d_model, seq_len) 的组合，测 attention 的 forward / backward 耗时与显存。
+遍历 (impl, d_model, seq_len) 的组合，测 attention 的 forward / backward 耗时与显存。
 
-- d_model ∈ [16, 32, 64, 128]
-- seq_len ∈ [256, 1024, 4096, 8192, 16384]
+- d_model ∈ [16, 32, 64]
+- seq_len ∈ [256, 1024, 4096]
+- impl ∈ [cs336, flash_pytorch, flash_triton]
 - 每个配置：warm-up 后 forward 跑 iters 次计时；backward 跑 iters 次计时
 - 每次 forward/backward 后都会 torch.cuda.synchronize()
 
 用法示例：
-  # bf16，默认 iters=100, warmup=10
+  # bf16，默认测三种实现
   uv run python scripts/attention_benchmark.py --dtype bf16
 
-  # 自定义迭代次数 / warmup
-  uv run python scripts/attention_benchmark.py --dtype bf16 --warmup 5 --iters 50
+  # 只测其中两种实现
+  uv run python scripts/attention_benchmark.py --dtype bf16 --impls cs336 flash_triton
 
-  # fp32（更慢但更稳）
+  # 自定义迭代次数 / warmup
   uv run python scripts/attention_benchmark.py --dtype fp32 --warmup 5 --iters 50
 """
 import argparse
 import traceback
 import torch
-import inspect
 
 from cs336_basics.model import scaled_dot_product_attention as cs336_sdp
+from cs336_systems.flash_attention_pytorch import FlashAttentionForwardPytorch
+from cs336_systems.flash_attention_triton import FlashAttentionForwardTriton
 
 
 def get_attention_fn(which: str):
-    if which != "cs336":
-        raise ValueError("only --impl cs336 is supported in this script")
+    if which == "cs336":
+        def attention_fn(q, k, v):
+            return cs336_sdp(Q=q, K=k, V=v, mask=None)
 
-    params = inspect.signature(cs336_sdp).parameters
+        return attention_fn
 
-    def attention_fn(q, k, v):
-        kwargs = {}
-        if "is_causal" in params:
-            kwargs["is_causal"] = False
-        if "attn_mask" in params:
-            kwargs["attn_mask"] = None
-        if "mask" in params:
-            kwargs["mask"] = None
-        if "dropout_p" in params:
-            kwargs["dropout_p"] = 0.0
-        return cs336_sdp(q, k, v, **kwargs)
+    if which == "flash_pytorch":
+        def attention_fn(q, k, v):
+            return FlashAttentionForwardPytorch.apply(q, k, v, False)
 
-    return attention_fn
+        return attention_fn
+
+    if which == "flash_triton":
+        def attention_fn(q, k, v):
+            return FlashAttentionForwardTriton.apply(q, k, v, False)
+
+        return attention_fn
+
+    raise ValueError(f"unknown --impl: {which}")
 
 
 @torch.no_grad()
@@ -119,7 +122,12 @@ def bytes_to_gib(x: int) -> float:
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dtype", default="bf16", choices=["fp16", "bf16", "fp32"])
-    p.add_argument("--impl", default="cs336", choices=["cs336"])
+    p.add_argument(
+        "--impls",
+        nargs="+",
+        default=["cs336", "flash_pytorch", "flash_triton"],
+        choices=["cs336", "flash_pytorch", "flash_triton"],
+    )
     p.add_argument("--device", default="cuda")
     p.add_argument("--iters", type=int, default=100)
     p.add_argument("--warmup", type=int, default=10)
@@ -139,70 +147,71 @@ def main():
     else:
         dtype = torch.float32
 
-    attn = get_attention_fn(args.impl)
-    if args.compile:  # 触发编译
-        attn = torch.compile(attn, mode=args.compile_mode, fullgraph=args.fullgraph)
-
     B = 8
-    d_models = [16, 32, 64, 128]
-    seq_lens = [256, 1024, 4096, 8192, 16384]
+    d_models = [16, 32, 64]
+    seq_lens = [256, 1024, 4096]
 
     results = []
 
-    for d in d_models:
-        for L in seq_lens:
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
+    for impl in args.impls:
+        attn = get_attention_fn(impl)
+        if args.compile:  # 触发编译
+            attn = torch.compile(attn, mode=args.compile_mode, fullgraph=args.fullgraph)
 
-            row = {
-                "d_model": d,
-                "seq_len": L,
-                "status": "ok",
-                "fwd_ms": None,
-                "bwd_ms": None,
-                "mem_before_bw_gib": None,
-                "peak_gib": None,
-            }
+        for d in d_models:
+            for L in seq_lens:
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
 
-            try:
-                # 随机输入 Q,K,V，去掉 head 维度：shape [B, L, D]
-                q = torch.randn(B, L, d, device="cuda", dtype=dtype, requires_grad=True)
-                k = torch.randn(B, L, d, device="cuda", dtype=dtype, requires_grad=True)
-                v = torch.randn(B, L, d, device="cuda", dtype=dtype, requires_grad=True)
+                row = {
+                    "impl": impl,
+                    "d_model": d,
+                    "seq_len": L,
+                    "status": "ok",
+                    "fwd_ms": None,
+                    "bwd_ms": None,
+                    "mem_before_bw_gib": None,
+                    "peak_gib": None,
+                }
 
-                if args.compile:    # 触发编译（不要把编译时间算进计时）
-                    _ = attn(q, k, v)
-                    torch.cuda.synchronize()
+                try:
+                    # 随机输入 Q,K,V，去掉 head 维度：shape [B, L, D]
+                    q = torch.randn(B, L, d, device="cuda", dtype=dtype, requires_grad=True)
+                    k = torch.randn(B, L, d, device="cuda", dtype=dtype, requires_grad=True)
+                    v = torch.randn(B, L, d, device="cuda", dtype=dtype, requires_grad=True)
 
-                # 进行 100 次 forward 计时
-                # noinspection PyTypeChecker
-                row["fwd_ms"] = time_forward(attn, q, k, v, iters=args.iters, warmup=args.warmup)
+                    if args.compile:    # 触发编译（不要把编译时间算进计时）
+                        _ = attn(q, k, v)
+                        torch.cuda.synchronize()
 
-                # backward 之前测显存 + 进行 100 次 backward 计时
-                bwd_ms, mem_before_bw, peak = time_backward(attn, q, k, v, iters=args.iters, warmup=max(3, args.warmup // 2))
-                row["bwd_ms"] = bwd_ms
-                row["mem_before_bw_gib"] = bytes_to_gib(mem_before_bw)
-                row["peak_gib"] = bytes_to_gib(peak)
+                    row["fwd_ms"] = time_forward(attn, q, k, v, iters=args.iters, warmup=args.warmup)
 
-            except RuntimeError as e:
-                msg = str(e).lower()
-                if "out of memory" in msg:
-                    row["status"] = "oom"
-                    # 清理 OOM 后的状态
-                    del q, k, v
-                    torch.cuda.empty_cache()
-                    torch.cuda.reset_peak_memory_stats()
-                    torch.cuda.synchronize()
-                else:
-                    row["status"] = f"error: {type(e).__name__}"
-                    print("ERROR:", e)
-                    traceback.print_exc()
+                    bwd_ms, mem_before_bw, peak = time_backward(
+                        attn, q, k, v, iters=args.iters, warmup=max(3, args.warmup // 2)
+                    )
+                    row["bwd_ms"] = bwd_ms
+                    row["mem_before_bw_gib"] = bytes_to_gib(mem_before_bw)
+                    row["peak_gib"] = bytes_to_gib(peak)
 
-            results.append(row)
+                except RuntimeError as e:
+                    msg = str(e).lower()
+                    if "out of memory" in msg:
+                        row["status"] = "oom"
+                        # 清理 OOM 后的状态
+                        del q, k, v
+                        torch.cuda.empty_cache()
+                        torch.cuda.reset_peak_memory_stats()
+                        torch.cuda.synchronize()
+                    else:
+                        row["status"] = f"error: {type(e).__name__}"
+                        print("ERROR:", e)
+                        traceback.print_exc()
+
+                results.append(row)
 
     print("\n====== Benchmark results ======")
     print(
-        f"{'d_model':>6} {'seq_len':>7} {'status':>6} {'fwd_ms':>10} {'bwd_ms':>10} {'memBW(GiB)':>11} {'peak(GiB)':>10}")
+        f"{'impl':>14} {'d_model':>6} {'seq_len':>7} {'status':>6} {'fwd_ms':>10} {'bwd_ms':>10} {'memBW(GiB)':>11} {'peak(GiB)':>10}")
     for r in results:
         def fmt(x, nd=3):
             if x is None:
@@ -212,7 +221,7 @@ def main():
             return str(x)
 
         print(
-            f"{r['d_model']:>6} {r['seq_len']:>7} {r['status']:>6} "
+            f"{r['impl']:>14} {r['d_model']:>6} {r['seq_len']:>7} {r['status']:>6} "
             f"{fmt(r['fwd_ms']):>10} {fmt(r['bwd_ms']):>10} "
             f"{fmt(r['mem_before_bw_gib']):>11} {fmt(r['peak_gib']):>10}"
         )
