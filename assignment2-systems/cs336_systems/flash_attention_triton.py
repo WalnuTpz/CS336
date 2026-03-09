@@ -91,7 +91,7 @@ def flash_fwd_kernel(
         offs_k = k_start + tl.arange(0, K_TILE_SIZE)    # 当前 k_tile 中每一行的全局偏移量
         valid_k = offs_k < N_KEYS    # 合法的 key 行的位置
 
-        k = tl.load(K_block_ptr, boundary_check=(0, 1), padding_option="zero")
+        k = tl.load(K_block_ptr, boundary_check=(0, 1), padding_option="zero").to(tl.float32)
         v = tl.load(V_block_ptr, boundary_check=(0, 1), padding_option="zero")
 
         # 分块 softmax
