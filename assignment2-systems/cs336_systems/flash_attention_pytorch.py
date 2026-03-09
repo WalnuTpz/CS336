@@ -24,7 +24,7 @@ def _flash_backward_pytorch_impl(
     dOf = dO.float()
     Lf = L.float()
 
-    # S = QK^T / sqrt(D)
+    # S = Q @ K^T / sqrt(D)
     S = torch.matmul(Qf, Kf.transpose(-2, -1)) * scale  # (..., N, N)
     causal_mask = None
     if is_causal:
@@ -119,7 +119,8 @@ class FlashAttentionForwardPytorch(torch.autograd.Function):
         return O_out
 
     @staticmethod
-    def backward(ctx, dO):
+    def backward(ctx, *grad_outputs):
+        (dO,) = grad_outputs    # 实际上本题的 grad_outputs 只用接受 dO 这一个输出对应的梯度
         L, Q, K, V, O = ctx.saved_tensors
         dQ, dK, dV = _flash_backward_pytorch_compiled(
             Q, K, V, O, dO, L, ctx.is_causal

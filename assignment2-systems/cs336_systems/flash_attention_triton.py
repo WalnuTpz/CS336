@@ -112,15 +112,60 @@ def flash_fwd_kernel(
 
 
 class FlashAttentionForwardTriton(torch.autograd.Function):
-    @staticmethod
     def forward(
         ctx,
-        Q: Tensor,          # (..., N, D)
-        K: Tensor,          # (..., N, D)
-        V: Tensor,          # (..., N, D)
+        Q: Tensor,  # (..., N, D)
+        K: Tensor,  # (..., N, D)
+        V: Tensor,  # (..., N, D)
         is_causal: bool = False,
-    ) -> Tensor:           # (..., N, D)
-        raise NotImplementedError
+    ) -> Tensor:  # (..., N, D)
+        assert Q.is_cuda and K.is_cuda and V.is_cuda, "Triton kernel requires CUDA tensors"
+        assert Q.shape == K.shape == V.shape
+        assert Q.is_contiguous() and K.is_contiguous() and V.is_contiguous(), \
+            "Please pass contiguous Q/K/V"
+        assert Q.dtype in (torch.float16, torch.bfloat16, torch.float32)
+
+        *batch_dims, N, D = Q.shape
+        B = math.prod(batch_dims) if len(batch_dims) > 0 else 1
+
+        # 将前导维度展平
+        Q_ = Q.reshape(B, N, D)
+        K_ = K.reshape(B, N, D)
+        V_ = V.reshape(B, N, D)
+
+        O_ = torch.empty_like(Q_)
+        L_ = torch.empty((B, N), device=Q.device, dtype=torch.float32)
+
+        Q_TILE_SIZE = 16
+        K_TILE_SIZE = 16
+        scale = 1.0 / math.sqrt(D)
+
+        grid = (triton.cdiv(N, Q_TILE_SIZE), B)
+
+        flash_fwd_kernel[grid](
+            Q_, K_, V_,
+            O_, L_,
+            Q_.stride(0), Q_.stride(1), Q_.stride(2),
+            K_.stride(0), K_.stride(1), K_.stride(2),
+            V_.stride(0), V_.stride(1), V_.stride(2),
+            O_.stride(0), O_.stride(1), O_.stride(2),
+            L_.stride(0), L_.stride(1),
+            N, N,
+            scale,
+            D=D,
+            Q_TILE_SIZE=Q_TILE_SIZE,
+            K_TILE_SIZE=K_TILE_SIZE,
+            IS_CAUSAL=is_causal,
+            num_warps=4,
+            num_stages=2,
+        )
+
+        O = O_.reshape(*batch_dims, N, D)
+        L = L_.reshape(*batch_dims, N)
+
+        ctx.save_for_backward(L, Q, K, V, O)
+        ctx.is_causal = is_causal
+        return O
 
     @staticmethod
     def backward(ctx, dO):
