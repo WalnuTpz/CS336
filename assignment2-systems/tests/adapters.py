@@ -20,8 +20,8 @@ def get_flashattention_autograd_function_pytorch() -> Type:
     return FlashAttentionForwardPytorch
 
 from cs336_systems.flash_attention_triton import FlashAttentionForwardTriton
+from cs336_systems.ddp import DDP
 from cs336_systems.ddp import DDPBucketed
-from cs336_systems.ddp import DDPIndividualParameters
 
 def get_flashattention_autograd_function_triton() -> Type:
     """
@@ -56,7 +56,7 @@ def get_ddp_individual_parameters(module: torch.nn.Module) -> torch.nn.Module:
     Returns:
         Instance of a DDP class.
     """
-    return DDPIndividualParameters(module)
+    return DDP(module)
 
 
 def ddp_individual_parameters_on_after_backward(ddp_model: torch.nn.Module, optimizer: torch.optim.Optimizer):

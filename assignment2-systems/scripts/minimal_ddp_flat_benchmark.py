@@ -41,7 +41,7 @@ import torch.nn.functional as F
 from cs336_basics.model import BasicsTransformerLM
 from cs336_basics.optimizer import AdamW
 from cs336_systems.ddp import DDPFlatGradients
-from cs336_systems.ddp import DDPIndividualParameters
+from cs336_systems.ddp import DDP
 
 
 @dataclass(frozen=True)
@@ -130,7 +130,7 @@ def build_ddp_wrapper(
     model: BasicsTransformerLM,
 ) -> torch.nn.Module:    # 按实现名选择 individual 或 flat 的最小 DDP 包装器。
     if impl == "individual":
-        return DDPIndividualParameters(model)
+        return DDP(model)
     if impl == "flat":
         return DDPFlatGradients(model)
     raise ValueError(f"unknown impl: {impl}")

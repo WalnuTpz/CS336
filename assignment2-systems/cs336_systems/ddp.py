@@ -18,6 +18,7 @@ def _iter_unique_parameters(
     for param in module.parameters():
         if requires_grad_only and not param.requires_grad:
             continue
+        # tied weights 会在 parameters() 里重复出现，这里按对象 id 去重。
         if id(param) in seen_param_ids:
             continue
         seen_param_ids.add(id(param))
@@ -31,6 +32,7 @@ def _broadcast_module_state(module: nn.Module) -> None:    # 用 rank 0 的参�
         return
 
     with torch.no_grad():
+        # state_dict() 同时覆盖参数和 buffer，初始化后各 rank 状态应完全一致。
         for tensor in module.state_dict().values():
             dist.broadcast(tensor, src=0)
 
@@ -48,6 +50,7 @@ def _average_bucket_gradients(
     if not grads:
         return
 
+    # 先展平成一个连续大张量，再做一次 collective。
     flat_grad = torch.cat([grad.reshape(-1) for grad in grads])
     dist.all_reduce(flat_grad, op=dist.ReduceOp.SUM)
     flat_grad.div_(world_size)
@@ -76,6 +79,7 @@ def _build_buckets(
 
     for param in params:
         param_size = param.numel() * param.element_size()
+        # 超过阈值就切到下一个 bucket，保持每个 bucket 大小可控。
         if current_bucket and current_bucket_size + param_size > bucket_size_bytes:
             buckets.append(current_bucket)
             current_bucket = []
@@ -104,7 +108,7 @@ class _BaseDDP(nn.Module):
         return self.module(*args, **kwargs)
 
 
-class DDPIndividualParameters(_BaseDDP):
+class DDP(_BaseDDP):
     def __init__(
         self,
         module: nn.Module,
@@ -114,16 +118,49 @@ class DDPIndividualParameters(_BaseDDP):
             self.module,
             requires_grad_only=True,
         )
+        # 记录每个参数当前尚未 wait 的异步 all-reduce work。
+        self.pending_works: dict[int, dist.Work] = {}
+        # 保存 hook handle，避免 hook 因引用丢失而被移除。
+        self.hook_handles = []
 
-    def finish_gradient_synchronization(self) -> None:    # backward 后逐个参数做 all-reduce。
+        for param in self.grad_params:
+            handle = param.register_post_accumulate_grad_hook(
+                self._make_post_accumulate_hook(param)
+            )
+            self.hook_handles.append(handle)
+
+    def _make_post_accumulate_hook(
+        self,
+        param: nn.Parameter,
+    ):    # 为单个参数创建“梯度一就绪就异步 all-reduce”的 hook。
+        param_id = id(param)
+
+        def hook(grad_param: nn.Parameter) -> None:
+            if self.world_size == 1 or grad_param.grad is None:
+                return
+            # 同一轮 backward 中，一个参数只发起一次异步通信。
+            if param_id in self.pending_works:
+                return
+            self.pending_works[param_id] = dist.all_reduce(
+                grad_param.grad,
+                op=dist.ReduceOp.SUM,
+                async_op=True,
+            )
+
+        return hook
+
+    def finish_gradient_synchronization(self) -> None:    # backward 后等待所有异步 all-reduce 完成，并把梯度取平均。
         if self.world_size == 1:
             return
 
         for param in self.grad_params:
             if param.grad is None:
                 continue
-            _average_gradient(param.grad, self.world_size)
-
+            work = self.pending_works.pop(id(param), None)
+            # 在 optimizer.step() 前把所有异步通信真正收完。
+            if work is not None:
+                work.wait()
+            param.grad.div_(self.world_size)
 
 class DDPBucketed(_BaseDDP):
     def __init__(
