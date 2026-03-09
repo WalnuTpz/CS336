@@ -38,7 +38,7 @@ import torch.nn.functional as F
 
 from cs336_basics.model import BasicsTransformerLM
 from cs336_basics.optimizer import AdamW
-from cs336_systems.ddp import DDP
+from cs336_systems.ddp import NaiveDDP
 
 
 @dataclass(frozen=True)
@@ -160,7 +160,7 @@ def benchmark_worker(
         rope_theta=args.rope_theta,
         spec=spec,
     ).to(device=device, dtype=dtype)
-    ddp_model = DDP(model)
+    ddp_model = NaiveDDP(model)
     optimizer = AdamW(ddp_model.parameters(), lr=args.lr)
 
     local_batch_size = args.local_batch_size

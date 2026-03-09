@@ -108,6 +108,27 @@ class _BaseDDP(nn.Module):
         return self.module(*args, **kwargs)
 
 
+class NaiveDDP(_BaseDDP):
+    def __init__(
+        self,
+        module: nn.Module,
+    ) -> None:    # backward 结束后再逐参数同步梯度的朴素 DDP 包装器。
+        super().__init__(module)
+        self.grad_params = _iter_unique_parameters(
+            self.module,
+            requires_grad_only=True,
+        )
+
+    def finish_gradient_synchronization(self) -> None:    # backward 后逐个参数同步并取平均。
+        if self.world_size == 1:
+            return
+
+        for param in self.grad_params:
+            if param.grad is None:
+                continue
+            _average_gradient(param.grad, self.world_size)
+
+
 class DDP(_BaseDDP):
     def __init__(
         self,
