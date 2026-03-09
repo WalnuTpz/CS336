@@ -120,6 +120,14 @@ def bytes_to_gib(x: int) -> float:
     return x / (1024 ** 3)
 
 
+def _format_metric(x, nd=3):
+    if x is None:
+        return "-"
+    if isinstance(x, float):
+        return f"{x:.{nd}f}"
+    return str(x)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dtype", default="bf16", choices=["fp16", "bf16", "fp32"])
@@ -153,6 +161,12 @@ def main():
     seq_lens = [1024, 4096, 8192]
 
     results = []
+
+    print("\n====== Benchmark results ======")
+    print(
+        f"{'impl':>14} {'d_model':>6} {'seq_len':>7} {'status':>6} {'fwd_ms':>10} {'bwd_ms':>10} {'memBW(GiB)':>11} {'peak(GiB)':>10}",
+        flush=True,
+    )
 
     for impl in args.impls:
         attn = get_attention_fn(impl)
@@ -209,23 +223,12 @@ def main():
                         traceback.print_exc()
 
                 results.append(row)
-
-    print("\n====== Benchmark results ======")
-    print(
-        f"{'impl':>14} {'d_model':>6} {'seq_len':>7} {'status':>6} {'fwd_ms':>10} {'bwd_ms':>10} {'memBW(GiB)':>11} {'peak(GiB)':>10}")
-    for r in results:
-        def fmt(x, nd=3):
-            if x is None:
-                return "-"
-            if isinstance(x, float):
-                return f"{x:.{nd}f}"
-            return str(x)
-
-        print(
-            f"{r['impl']:>14} {r['d_model']:>6} {r['seq_len']:>7} {r['status']:>6} "
-            f"{fmt(r['fwd_ms']):>10} {fmt(r['bwd_ms']):>10} "
-            f"{fmt(r['mem_before_bw_gib']):>11} {fmt(r['peak_gib']):>10}"
-        )
+                print(
+                    f"{row['impl']:>14} {row['d_model']:>6} {row['seq_len']:>7} {row['status']:>6} "
+                    f"{_format_metric(row['fwd_ms']):>10} { _format_metric(row['bwd_ms']):>10} "
+                    f"{_format_metric(row['mem_before_bw_gib']):>11} { _format_metric(row['peak_gib']):>10}",
+                    flush=True,
+                )
     print("\n================================")
 
 if __name__ == "__main__":
