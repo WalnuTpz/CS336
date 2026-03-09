@@ -96,6 +96,11 @@ class FlashAttentionForwardPytorch(torch.autograd.Function):
                 Vj = Vf[..., j : j_end, :]  # (..., Nj, D)
 
                 Sij = einsum(Qi, Kj, "... q d, ... k d -> ... q k") * scale  # (..., Mi, Nj)
+                if is_causal:
+                    q_idx = torch.arange(i, i_end, device=Q.device)
+                    k_idx = torch.arange(j, j_end, device=Q.device)
+                    causal_mask = q_idx[:, None] >= k_idx[None, :]
+                    Sij = torch.where(causal_mask, Sij, torch.full_like(Sij, float("-inf")))
                 mij = torch.max(Sij, dim=-1).values  # (..., Mi)，这部分的最大值
                 m_new = torch.maximum(mi, mij)    # 更新该行的最大值
                 alpha = torch.exp(mi - m_new)    # 缩放系数
