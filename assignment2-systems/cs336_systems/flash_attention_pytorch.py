@@ -4,6 +4,60 @@ from torch import Tensor
 from einops import einsum
 
 
+def _flash_backward_pytorch_impl(
+    Q: Tensor,  # (..., N, D)
+    K: Tensor,  # (..., N, D)
+    V: Tensor,  # (..., N, D)
+    O: Tensor,  # (..., N, D)
+    dO: Tensor,  # (..., N, D)
+    L: Tensor,  # (..., N)
+    is_causal: bool = False,
+) -> tuple[Tensor, Tensor, Tensor]:
+    *batch_dims, N, D = Q.shape
+    scale = 1.0 / math.sqrt(D)
+
+    # 为了数值稳定，内部统一用 float32
+    Qf = Q.float()
+    Kf = K.float()
+    Vf = V.float()
+    Of = O.float()
+    dOf = dO.float()
+    Lf = L.float()
+
+    # S = QK^T / sqrt(D)
+    S = torch.matmul(Qf, Kf.transpose(-2, -1)) * scale  # (..., N, N)
+    causal_mask = None
+    if is_causal:
+        q_idx = torch.arange(N, device=Q.device)
+        k_idx = torch.arange(N, device=Q.device)
+        causal_mask = q_idx[:, None] >= k_idx[None, :]  # (N, N)
+        S = torch.where(causal_mask, S, torch.full_like(S, -1.0e6))
+
+    # P = exp(S - L)
+    P = torch.exp(S - Lf.unsqueeze(-1))  # (..., N, N)
+    if is_causal:
+        P = torch.where(causal_mask, P, torch.zeros_like(P))
+
+    D_vec = torch.sum(dOf * Of, dim=-1)  # (..., N), D vector: D_i = sum_d dO_i[d] * O_i[d]
+    dVf = torch.matmul(P.transpose(-2, -1), dOf)  # (..., N, D), dP = dO @ V^T
+    dP = torch.matmul(dOf, Vf.transpose(-2, -1))  # (..., N, N), dP = dO @ V^T
+    dS = P * (dP - D_vec.unsqueeze(-1))  # (..., N, N), dS = P * (dP - D)
+    dQf = scale * torch.matmul(dS, Kf)  # (..., N, D), dQ = scale * dS @ K
+    dKf = scale * torch.matmul(dS.transpose(-2, -1), Qf)  # (..., N, D), dK = scale * dS^T @ Q
+
+    dQ = dQf.to(Q.dtype)
+    dK = dKf.to(K.dtype)
+    dV = dVf.to(V.dtype)
+
+    return dQ, dK, dV
+
+
+try:
+    _flash_backward_pytorch_compiled = torch.compile(_flash_backward_pytorch_impl)
+except Exception:
+    _flash_backward_pytorch_compiled = _flash_backward_pytorch_impl
+
+
 class FlashAttentionForwardPytorch(torch.autograd.Function):
     @staticmethod
     def forward(
@@ -66,4 +120,8 @@ class FlashAttentionForwardPytorch(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, dO):
-        raise NotImplementedError
+        L, Q, K, V, O = ctx.saved_tensors
+        dQ, dK, dV = _flash_backward_pytorch_compiled(
+            Q, K, V, O, dO, L, ctx.is_causal
+        )
+        return dQ, dK, dV, None
