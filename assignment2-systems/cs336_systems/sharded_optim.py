@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import timeit
 from typing import Any
 
 import torch
@@ -84,6 +85,10 @@ class ShardedOptimizer(torch.optim.Optimizer):
             if self.local_param_groups
             else None
         )
+        self.enable_timing = False
+        self.last_local_step_ms = 0.0
+        self.last_sync_ms = 0.0
+        self.last_total_step_ms = 0.0
         if self.local_optimizer is not None:
             # 对外暴露的 state 只包含当前 rank 持有的那部分优化器状态。
             self.state = self.local_optimizer.state
@@ -130,18 +135,42 @@ class ShardedOptimizer(torch.optim.Optimizer):
         self,
         closure=None,
     ):    # 当前 rank 只更新自己拥有的参数，然后把更新结果广播给所有 rank。
+        timer = timeit.default_timer
         loss = None
+        local_t0 = timer()
         if self.local_optimizer is not None:
             loss = self.local_optimizer.step(closure)
         elif closure is not None:
             with torch.enable_grad():
                 loss = closure()
+        local_t1 = timer()
+        if self.enable_timing:
+            self._sync_if_cuda()
+            local_t1 = timer()
 
         if self.world_size == 1:
+            self.last_local_step_ms = (local_t1 - local_t0) * 1000.0
+            self.last_sync_ms = 0.0
+            self.last_total_step_ms = self.last_local_step_ms
             return loss
 
+        sync_t0 = timer()
         for param in self.global_params:
             owner_rank = self.param_owner_map[id(param)]
             dist.broadcast(param.data, src=owner_rank)
+        sync_t1 = timer()
+        if self.enable_timing:
+            self._sync_if_cuda()
+            sync_t1 = timer()
+
+        self.last_local_step_ms = (local_t1 - local_t0) * 1000.0
+        self.last_sync_ms = (sync_t1 - sync_t0) * 1000.0
+        self.last_total_step_ms = self.last_local_step_ms + self.last_sync_ms
 
         return loss
+
+    def _sync_if_cuda(self) -> None:    # 只在 CUDA 上同步，保证 optimizer 内部计时边界准确。
+        if not self.global_params:
+            return
+        if self.global_params[0].device.type == "cuda":
+            torch.cuda.synchronize(self.global_params[0].device)
