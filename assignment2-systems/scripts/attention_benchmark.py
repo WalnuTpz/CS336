@@ -1,12 +1,13 @@
 """
-一个 attention_benchmark 脚本：固定 batch size=8、移除 head 维度，
+一个 attention_benchmark 脚本：固定 batch size=4、移除 head 维度，
 遍历 (impl, d_model, seq_len) 的组合，测 attention 的 forward / backward 耗时与显存。
 
-- d_model ∈ [16, 32, 64]
-- seq_len ∈ [256, 1024, 4096]
+- d_model ∈ [64, 256]
+- seq_len ∈ [1024, 4096, 8192]
 - impl ∈ [cs336, flash_pytorch, flash_triton]
 - 每个配置：warm-up 后 forward 跑 iters 次计时；backward 跑 iters 次计时
 - 每次 forward/backward 后都会 torch.cuda.synchronize()
+- 默认参数偏向“差异明显但不过分耗时”的设置
 
 用法示例：
   # bf16，默认测三种实现
@@ -129,8 +130,8 @@ def main():
         choices=["cs336", "flash_pytorch", "flash_triton"],
     )
     p.add_argument("--device", default="cuda")
-    p.add_argument("--iters", type=int, default=100)
-    p.add_argument("--warmup", type=int, default=10)
+    p.add_argument("--iters", type=int, default=20)
+    p.add_argument("--warmup", type=int, default=3)
     p.add_argument("--compile", action="store_true", help="使用 torch.compile 将 attention 进行编译")
     p.add_argument("--compile_mode", default="default", choices=["default", "reduce-overhead", "max-autotune"])
     p.add_argument("--fullgraph", action="store_true")
@@ -147,9 +148,9 @@ def main():
     else:
         dtype = torch.float32
 
-    B = 8
-    d_models = [16, 32, 64]
-    seq_lens = [256, 1024, 4096]
+    B = 4
+    d_models = [64, 256]
+    seq_lens = [1024, 4096, 8192]
 
     results = []
 
