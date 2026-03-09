@@ -7,6 +7,22 @@ import triton.language as tl
 from torch import Tensor
 
 
+def _pick_flash_tile_sizes(
+    N: int,
+    D: int,
+) -> tuple[int, int]:
+    # Triton 版本需要兼顾分块数量和寄存器压力，所以这里比 PyTorch 更保守一些
+    if D <= 64:
+        tile = 64 if N >= 4096 else 32
+    elif D <= 128:
+        tile = 32 if N >= 1024 else 16
+    elif D <= 256:
+        tile = 32 if N >= 4096 else 16
+    else:
+        tile = 16
+    return tile, tile
+
+
 @triton.jit
 def flash_fwd_kernel(
     Q_ptr, K_ptr, V_ptr,
@@ -408,8 +424,7 @@ class FlashAttentionForwardTriton(torch.autograd.Function):
         O_ = torch.empty_like(Q_)
         L_ = torch.empty((B, N), device=Q.device, dtype=torch.float32)
 
-        Q_TILE_SIZE = 16
-        K_TILE_SIZE = 16
+        Q_TILE_SIZE, K_TILE_SIZE = _pick_flash_tile_sizes(N, D)
         scale = 1.0 / math.sqrt(D)
 
         grid = (triton.cdiv(N, Q_TILE_SIZE), B)
@@ -464,8 +479,7 @@ class FlashAttentionForwardTriton(torch.autograd.Function):
         dK_ = torch.empty_like(K_)
         dV_ = torch.empty_like(V_)
 
-        Q_TILE_SIZE = 16
-        K_TILE_SIZE = 16
+        Q_TILE_SIZE, K_TILE_SIZE = _pick_flash_tile_sizes(N, D)
         scale = 1.0 / math.sqrt(D)
 
         # 先计算 backward 会反复用到的 D 向量

@@ -4,6 +4,20 @@ from torch import Tensor
 from einops import einsum
 
 
+def _pick_flash_block_sizes(
+    N: int,
+    D: int,
+) -> tuple[int, int]:
+    # PyTorch 版本的瓶颈主要来自 Python 层的分块循环，所以这里更激进一些
+    if D <= 64:
+        block = 128 if N >= 4096 else 64
+    elif D <= 128:
+        block = 64 if N >= 1024 else 32
+    else:
+        block = 64 if N >= 4096 else 32
+    return block, block
+
+
 def _flash_backward_pytorch_impl(
     Q: Tensor,  # (..., N, D)
     K: Tensor,  # (..., N, D)
@@ -69,8 +83,7 @@ class FlashAttentionForwardPytorch(torch.autograd.Function):
     ) -> Tensor:  # (..., N, D)
         *batch_dims, N, D = Q.shape  # *batch_dims 可以支持一维或二维的前导维度
         scale = 1.0 / math.sqrt(D)
-        BLOCK_M = 16
-        BLOCK_N = 16
+        BLOCK_M, BLOCK_N = _pick_flash_block_sizes(N, D)
 
         # 为了数值稳定，转换为 float32 计算
         Qf = Q.float()
@@ -88,6 +101,8 @@ class FlashAttentionForwardPytorch(torch.autograd.Function):
             Oi = torch.zeros((*batch_dims, Mi, D), device=Q.device, dtype=torch.float32)
             mi = torch.full((*batch_dims, Mi), float("-inf"), device=Q.device, dtype=torch.float32)
             li = torch.zeros((*batch_dims, Mi), device=Q.device, dtype=torch.float32)
+            if is_causal:
+                q_idx = torch.arange(i, i_end, device=Q.device)
 
             for j in range(0, N, BLOCK_N):
                 # Nj = j_end - j
@@ -97,7 +112,6 @@ class FlashAttentionForwardPytorch(torch.autograd.Function):
 
                 Sij = einsum(Qi, Kj, "... q d, ... k d -> ... q k") * scale  # (..., Mi, Nj)
                 if is_causal:
-                    q_idx = torch.arange(i, i_end, device=Q.device)
                     k_idx = torch.arange(j, j_end, device=Q.device)
                     causal_mask = q_idx[:, None] >= k_idx[None, :]
                     Sij = torch.where(causal_mask, Sij, torch.full_like(Sij, float("-inf")))
