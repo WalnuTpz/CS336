@@ -40,8 +40,10 @@ def run_classify_toxic_speech(text: str) -> tuple[Any, float]:
 
 
 
+from cs336_data.quality_classifier import classify_quality
+
 def run_classify_quality(text: str) -> tuple[Any, float]:
-    raise NotImplementedError
+    return classify_quality(text)
 
 
 from cs336_data.gopher_quality import gopher_quality_filter
@@ -50,10 +52,10 @@ def run_gopher_quality_filter(text: str) -> bool:
     return gopher_quality_filter(text)
 
 
-def run_exact_line_deduplication(
-    input_files: list[os.PathLike], output_directory: os.PathLike
-):
-    raise NotImplementedError
+from cs336_data.exact_deduplication import exact_line_deduplication
+
+def run_exact_line_deduplication(input_files: list[os.PathLike], output_directory: os.PathLike):
+    return exact_line_deduplication(input_files, output_directory)
 
 
 def run_minhash_deduplication(
