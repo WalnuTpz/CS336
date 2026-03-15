@@ -42,3 +42,7 @@ htmlcov/
 *.log
 tmp/
 temp/
+assignment4-data/assignment4_data_zh.md
+assignment4-data/CC-MAIN-20250417135010-20250417165010-00065.warc.gz
+.gitignore
+assignment4-data/CC-MAIN-20250417135010-20250417165010-00065.warc.wet.gz
