@@ -9,9 +9,10 @@ from cs336_data.extract_text import extract_text_from_html_bytes
 def run_extract_text_from_html_bytes(html_bytes: bytes) -> str | None:
     return extract_text_from_html_bytes(html_bytes)
 
+from cs336_data.language_identification import identify_language
 
 def run_identify_language(text: str) -> tuple[Any, float]:
-    raise NotImplementedError
+    return identify_language(text)
 
 
 def run_mask_emails(text: str) -> tuple[str, int]:
